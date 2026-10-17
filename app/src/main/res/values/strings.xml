@@ -1,3 +1,5 @@
 <resources>
     <string name="app_name">Copper Scroll</string>
+    <string name="startup_loading">Loading...</string>
+    <string name="startup_done">Done!</string>
 </resources>
