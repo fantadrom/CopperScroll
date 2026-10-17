@@ -1,0 +1,3 @@
+<resources>
+    <item type="id" name="toggle_current_todo" />
+</resources>
