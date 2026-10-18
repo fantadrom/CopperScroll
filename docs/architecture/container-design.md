@@ -1,16 +1,14 @@
 # Copper Scroll: архитектура защищённого контейнера
 
-Статус: решение этапа 1 для реализации прототипа; движок ещё не реализован.
+Статус: согласованная спецификация контейнера1.1, редакция2; движок ещё не реализован.
 Дата: 18 октября 2026. Нормативный формат: [container-format-v1.md](container-format-v1.md).
 Проверки: [container-test-plan.md](container-test-plan.md). Задание разработчику:
 [container-prototype-plan.md](container-prototype-plan.md).
 
-> **Уточнение от 18 октября 2026:** доступ к уплотнению и выбор зон определяет
-> [утверждённое дополнение](compaction-requirements-addendum.md). Оно имеет приоритет
-> над прежними положениями четырёх документов: команда доступна только из основной
-> сессии, выбранные зоны обрабатываются в одном кандидате. Ниже сохранён исходный
-> проект для независимой критической проверки; связанные правила и тесты требуют
-> согласования с дополнением до реализации.
+Все правила selective compact и смены секрета с новым ключом включены ниже.
+[Дополнение](compaction-requirements-addendum.md) согласовано с этой редакцией;
+[решения R/C](container-review-resolution.md) фиксируют изменения.
+[Критический отчёт](container-critical-review.md) остаётся историей SHA54e40f3.
 
 ## 1. Основание и границы
 
@@ -35,8 +33,8 @@
 | `RichNoteEditText.kt`, `docs/note-editor.md` | isSaveEnabled=false; ViewModel без SavedStateHandle; курсор/selection/scroll в памяти | Сохранить запрет дискового UI-state |
 | Manifest и XML backup rules | allowBackup=true и шаблонные, фактически не настроенные исключения | До подключения реальных данных настроить исключения и allowBackup=false |
 
-В репозитории и его родителях `AGENTS.md` не обнаружен. На этапе 1 меняются
-только эти четыре Markdown-документа. Нет правок UI, Gradle, manifest, зависимостей
+В репозитории и его родителях `AGENTS.md` не обнаружен. На этом этапе согласования меняются
+архитектурные документы и малые проверочные материалы. Нет правок UI, Gradle, manifest, зависимостей
 или демонстрационных данных. Упомянутые ниже API — задание следующему этапу.
 
 ## 2. Решение и сравнение вариантов
@@ -53,7 +51,7 @@ copy-on-write индексы и два чередующихся superblock. Вс
 | Частичные операции | Новые блоки изменённого объекта и пути индексов | Сильная сторона: страницы, индексы и зрелые транзакции |
 | Большие вложения | Двоичные chunks до 1 MiB, выборочное чтение | BLOB/incremental IO возможны; две зоны и переносимая упаковка усложняют доступ |
 | Сбои | Нужен собственный проверенный протокол фиксации | Зрелые механизмы SQLite при выполнении требований VFS/fsync/locking |
-| Уплотнение | Открытая зона по достижимости; закрытая целиком | VACUUM требует ключа DB; две упакованные DB требуют перепаковки |
+| Уплотнение | Выбранные зоны по достижимости; невыбранная целиком | VACUUM требует ключа DB; две упакованные DB требуют перепаковки |
 | SAF | rw/seek/fsync на проверенном локальном provider; без обязательного rename | Обычный Android API использует путь; произвольный SAF URI требует staging или собственного SQLite VFS |
 | Сложность проверки | Высокая: формат, COW, parser, crash injection; нельзя сразу объявлять production-ready | Меньше своей логики транзакций, но независимость зон и SAF возвращают внешнюю сложность |
 | Лицензии/поддержка | JCA Android + Bouncy Castle; поддержка собственного формата нашей командой | Community SQLCipher: BSD-style с notices; коммерческие сборки/поддержка по отдельной лицензии; native ABI и обновления |
@@ -66,329 +64,457 @@ SQLCipher не отвергается как ненадёжный: он хоро
 Здесь внешняя упаковка двух DB, staging и двойное шифрование создают больше слоёв,
 чем дают преимуществ. Не добавлять SQLCipher или Room в этом этапе.
 
-## 3. Криптографическая граница
+## 3. Криптографическая граница и доступ
 
-Для каждой зоны независимо: ZDK = 32 случайных байта от SecureRandom, отдельный
-Argon2id salt и AEAD-envelope ZDK. Основной пароль не знает и не восстанавливает
-ZDK фальшивой зоны. Android Keystore не участвует в обязательном пути открытия.
-Скопированный файл открывается на другом совместимом устройстве только паролем.
-Отдельной обёртки с двумя ZDK нет. Одновременно расшифрована одна зона; временное
-получение второго ключа допускается только при проверке/смене соответствующего пароля.
+Для каждой зоны независимый случайный ZDK32, отдельные salt и Argon2id envelope.
+Основной пароль не выводит и не восстанавливает decoy ZDK. Обязательного секрета
+Keystore/телефона нет: файл переносим с соответствующим паролем. Обычная сессия
+даёт доступ только одной зоне. Main-only MaintenanceContext может временно
+владеть independently unwrapped decoy и main handles; общего wrapper/verifier нет.
+Он не открывает decoy editor/list/search/history/media и не меняет UI mode.
 
-Готовые примитивы: AES-256-GCM (tag 128 бит) через Android JCA; Argon2id,
-HKDF-SHA-256 и HMAC-SHA-256 через Bouncy Castle lightweight API. Не регистрировать
-и не подменять системный provider BC. Кандидат для прототипа:
-`org.bouncycastle:bcprov-jdk15to18:1.86`, опубликованный в официальном списке
-загрузок на дату исследования. Версия должна пройти разрешение Maven, проверку
-лицензии, advisories, D8/R8 и тест API 31 перед фиксацией зависимости; совместимость
-этой сборки здесь не проверена. Лицензия Bouncy Castle permissive MIT-style;
-сохранить copyright/notices. Никаких собственных алгоритмов шифрования.
+AES-256-GCM/tag128 через Android JCA; Argon2id/HKDF-SHA256/HMAC-SHA256 готовой
+библиотекой. BC lightweight API не регистрирует системный provider. Кандидат
+`org.bouncycastle:bcprov-jdk15to18:1.86` ещё должен пройти Maven/license/advisories,
+known-answer vectors, API31 и release/R8 перед добавлением зависимости.
+Свежие IDs/nonce на каждое шифрование, RNG failure прекращает операцию.
 
-Секреты ввода нормализуются версионированным правилом S1 (формат, §3).
-ПИН сохраняет ведущие нули; текст — NFC без trim/case-fold; pattern — явно
-определённая последовательность точек. Одинаковое каноническое значение при разных
-способах ввода считается тем же секретом. Запрет равных паролей проверяется попыткой
-открыть envelope другой зоны новым секретом, без дополнительного общего verifier.
-Если обнаружена порча другой зоны или её KDF не поддерживается, смена/добавление пароля
-блокируется: нельзя честно проверить неравенство. Обычная работа исправной зоны
-при этом может продолжаться read-only без ключа другой. Без чужого секрета нельзя
-доказать криптографическую исправность её envelope: equality-check запрещает
-совпадение с текущим исправным envelope, а не восстанавливает разрушенный пароль.
+S1 однозначно определён форматом§3: Unicode16.0.0, NFC/UAX15rev56 с поставляемыми
+фиксированными таблицами; text не trim/case-fold/NFKC. Unassigned/Cn, Cs,
+noncharacters и NUL/CR/LF запрещены; private-use разрешены. Raw text≤1024 code
+points/4096B; после NFC1…256/1024B. PIN4/6 — ASCII с ведущими нулями; pattern3×3
+с однозначным midpoint,4…9 принятых точек. Способ не входит в bytes секрета.
+U+11382 U+113C9 → U+11383 → UTF-8 f0918e83 на всех устройствах. Системная NFC
+без подтверждённых данных16.0.0 запрещена. Note text не нормализуется.
 
-Начальная гипотеза для измерений: Argon2id v0x13, m=65536 KiB, t=3, p=1,
-salt=16 B, output=32 B. Это НЕ измеренные параметры и НЕ гарантия задержки.
-Допускаемые профили и бюджет чтения ограничены форматом. Измерить отдельно один
-и два последовательных slot, холодный запуск, нагрев, low-memory, API 31 и
-актуальный Android, минимум слабый и средний реальные телефоны. Цель для одного
-slot: ориентировочно 300–1000 мс, без OOM; фиксировать p50/p95, peak RSS и
-настройки. При нехватке памяти чтение завершается ResourceLimit, а не тихим
-ослаблением KDF. Более быстрый профиль выбирается только при создании/смене с
-явным сохранением его параметров. Слабый ПИН/графический ключ уязвим к offline
-перебору; UI задержки не являются защитой украденной копии.
+Запрет равных секретов проверяется новым S1 против current envelope другой зоны,
+без общего быстрого verifier. При её неподдержанном/повреждённом descriptor
+нельзя утверждать несовпадение: add/change secret отвергаются. Вход проверяет
+оба поддерживаемых envelope последовательно, два совпадения — AmbiguousCredential.
+Неверный tag не различает wrong secret и порчу envelope; после успешного unwrap
+неверный MAC/root/AEAD — CorruptData. UnsupportedKdf/SecretEncoding/ResourceLimit
+отдельны и не приводят к fallback/понижению профиля. Recovery — format§4.1.
 
-Подсказки по зонам открыты, не обязательны, доступны до входа после выбора файла.
-До задания показывается предупреждение из концепции о раскрытии пароля/второй зоны.
-Подсказка меняется только после аутентификации своей зоны и входит в её MAC.
-До входа её подлинность ещё не проверена; отображать как недоверенный текст без
-разметки, ссылок и выполнения действий. Пароли и их открытые копии не сохранять.
+Whitelist KDF: Argon2id19, m16/32/64MiB, t2/3/4, p1, salt16/out32, один worker,
+не более двух Argon2 на пользовательский submit. Current-target и new-secret
+submit обслуживания отдельны; новый submit использует максимум чужую проверку
+и создание envelope. Никакого автоматического перебора типов/старых headers.
+Creation hypothesis64MiB/3/1 не является измерением. Benchmark на слабом/среднем
+телефоне cold/warm/thermal/OOM должен выбрать профиль. UI задержка не защищает
+украденную копию от offline PIN/pattern перебора; сильный text предпочтительнее.
 
-Гарантируется проектом разделение ключей, а не сокрытие числа зон. Наблюдаемы
-размер, версии, ID, количество/роль зон, KDF, hint, типы/размеры записей и история
-роста. Нет защиты от полного отката к старой копии, удаления файла, root/вредоносной
-ОС, чтения памяти открытой сессии или недобросовестного provider. AEAD обнаруживает
-подмену прочитанного содержимого; не обеспечивает доступность всех блоков.
+**ChangeSecret всегда заменяет ZDK и перешифровывает целевую зону в новый файл.**
+Старый пароль повторно проверяется; новый дважды и не равен секрету другой зоны.
+При прежнем S1 — UnchangedSecret, не «успешная смена». Режим быстрого rewrap не
+предлагается. Старый ZDK не открывает новую целевую зону/будущие данные, если
+новый секрет/ключ не скомпрометирован. Уже известный plaintext и старые копии
+остаются известными. Старые source/backup открываются прежним паролем; UI об
+этом предупреждает. Пароли обоих хранилищ меняются только из main; забытый decoy
+не reset/удаляется и не восстанавливается main. Полный алгоритм — §8.3.
 
-## 4. SAF и допустимая среда записи
+Предпочтительная панель ввода — отдельная локальная noBackup настройка, без
+изменения descriptor/envelope/ZDK. Она не конвертирует секрет. Descriptor.inputMethod
+меняется при create/add/ChangeSecret. Если ввод другим методом даёт другой S1,
+это ChangeSecret, даже при одновременной смене панели. Подсказка открыта,
+показывается plain text до входа как недоверенная; менять её только после
+аутентификации своей зоны с новым logical MAC через T (секрет/ключ не меняются).
 
-Создание: ACTION_OPEN_DOCUMENT_TREE, persistable read/write grant, создание
-`mystorage.cscroll` (при совпадении mystorage2.cscroll и далее) внутри выбранного
-дерева через DocumentsContract. MIME — `application/octet-stream`, расширение
-проверять отдельно. Имя не является идентификатором контейнера. Корень накопителя,
-Android/data и MANAGE_EXTERNAL_STORAGE не нужны. Android 11+ ограничивает выбор
-некоторых деревьев; объяснить пользователю необходимость обычной доступной папки.
-Открытие исходника: ACTION_OPEN_DOCUMENT + read/write/persistable grant.
-Папка копий выбирается отдельным tree picker; её разрешение не подразумевается
-разрешением контейнера. Не преобразовывать URI в предполагаемый filesystem path.
+Проект защищает конфиденциальность и подлинность проверенных records, а не
+доступность/свежесть/сокрытие числа зон. Публичны role/count/ID/KDF/hint/типы/размеры
+и рост. Публичный SHA не MAC. Полный rollback и selective replay старой main при
+актуальной decoy возможны без внешнего доверенного состояния: оба MAC могут быть
+верны. Root/вредоносная ОС, чтение памяти открытого обслуживания, несотрудничающий
+writer и произвольная порча носителя вне гарантий. Не добавлять общий ключ ради
+аутентификации generation другой зоны.
 
-Режимы всегда различимы в контракте и UI:
+## 4. SAF, долговечность и единственный владелец IO
 
-* `OpenOriginal(uri)` работает с выбранным файлом. Если запись не поддержана,
-  предложить явный read-only или отдельный импорт, не делать скрытую рабочую копию.
-* `ImportCopy(source, destinationTree)` создаёт новый независимый файл с новым URI;
-  исходник не меняет. Содержимое и внутренний containerId при побайтовом импорте
-  сохраняются; device binding использует URI + instanceId, не один containerId.
-* `RestoreCopy` также открывает отдельный файл и не перезаписывает активный.
+Create: ACTION_OPEN_DOCUMENT_TREE, фактический persistable read/write grant,
+новый уникальный `mystorage.cscroll` (при совпадении2,3…), MIME octet-stream.
+OpenOriginal: ACTION_OPEN_DOCUMENT, выбранный URI, никакого угадывания path.
+Контейнер и папка backup имеют независимые grants. Режимы не смешиваются:
 
-Запись v1 разрешается только локальному проверенному provider, возвращающему
-обычный seekable rw FD: fstat/S_ISREG, lseek/pread/pwrite, fsync, повторное чтение,
-сохранение прежнего диапазона при append и отсутствие truncate при открытии rw.
-Проверка записи делается на отдельном scratch-документе в выбранном дереве, никогда
-на полезных байтах контейнера. Для OpenOriginal без tree-grant нужен известный
-протестированный профиль authority/version или явный выбор его папки для probe.
-Флаги SUPPORTS_WRITE/RENAME сами по себе недостаточны. Pipe, virtual document,
-remote/cloud, deferred upload, failure fsync, отсутствие проверенного профиля:
-read-only либо отказ до редактирования. Повторять gate при смене provider/version.
+| Режим | Контракт |
+| --- | --- |
+| OpenOriginal | Работает с исходником; если запись не поддержана, явный read-only/отказ, без скрытой staging-копии |
+| ImportCopy | Явно создаёт независимый новый документ; source прежний, внутренние IDs при byte-copy прежние, URI отдельный |
+| RestoreCopy | Новый отдельный файл, не перезаписывает активный; выбор нового binding подтверждается |
 
-Успешный probe не доказывает долговечность при отключении питания. Перед разрешением
-production-записи нужны fault-тесты конкретного provider и документированный
-контракт его FD; список поддерживаемых provider пока пуст. Для неизвестных
-provider никаких обещаний атомарного rename. Обычное сохранение вообще не требует
-rename: append + inactive superblock. Даже для локальной ФС гарантии ниже условны
-на корректную реализацию fsync и сохранность ранее синхронизированных диапазонов.
-При произвольной порче носителя восстановление только из копии.
+Gate привязан к authority+provider build/version+Android/API+root/volume/backend,
+а не ко всем деревьям одной authority. Проверять отдельно источник, backup и
+candidate destinations. Доказанные профили пока **пусты**. Неизвестный/cloud/pipe/
+virtual/deferred-upload provider — read-only/отказ до edit. Флаги WRITE/RENAME,
+seek и readback сами по себе не сертификат. Probe только на отдельном scratch,
+никогда на полезных bytes. До password validation обслуживания допустимы лишь
+read-only проверки уже выданных grants/profiles; создающий scratch probe должен
+быть выполнен заранее в отдельной настройке или после необходимых проверок
+секретов. Неверный decoy secret не оставляет artifacts/reservations.
 
-takePersistableUriPermission использует лишь фактически выданные флаги;
-SecurityException/отзыв grant переводит доступ в ошибку и блокирует запись.
-После перемещения/удаления — повторный picker, проверка header/ID/generation,
-явное подтверждение другой копии при несовпадении. Не создавать пустой контейнер
-на месте недоступного без отдельной команды пользователя.
+| Гарантия профиля | Обязательное доказательство / статус при отсутствии |
+| --- | --- |
+| ExistingWriteDurable | Seekable rw regular FD, checked pread/pwrite/full IO, отсутствие truncate при rw, честный fsync и сохранность прежних durable ranges; device faults. Без этого только read-only |
+| DurableCreateIdentity | Файл, имя/documentId и доступность по URI долговечны после поддержанного power loss. file fsync+reopen не подтверждают namespace. Нужен контракт/испытания конкретного root/backend; без него нет strong VerifiedCopy/VerifiedCandidate/нового Committed |
+| DurableLocalState | Binding+journal атомарно и долговечно публикуются в app-private noBackup. Испытаны write/force/atomic rename/parent sync либо эквивалентная durable transaction; без этого production maintenance/switch запрещены |
 
-Один writer на файл: process Mutex + advisory file lock на FD на всю writable
-сессию; сравнение обоих superblock, generation и file size перед каждой фиксацией.
-При изменении извне — Conflict и закрытие writer. SAF не даёт универсального
-межпроцессного CAS: несотрудничающий внешний writer не поддерживается. Две копии
-с одним containerId нельзя автоматически синхронизировать или сливать.
+Для local metadata путь приложения известен: одна транзакционно заменяемая запись
+содержит binding и maintenance journal вместе, не две независимо сохраняемые prefs.
+Реализация: временный файл в том же app-private каталоге → полный write/force →
+atomic rename/replace → force каталога; каждый результат проверяется, faults дают
+старую/новую целую запись или явный StateUnknown. Контракт примитива надо испытать
+на Android; SharedPreferences.apply не заменяет durable ACK. Новое имя metadata
+тоже требует namespace durability. Повреждённую запись не «чинить» выбором mtime.
+
+FD SAF не даёт права угадывать путь и fsync родительского чужого каталога. Если
+provider не даёт проверяемого DurableCreateIdentity, операция возвращает
+UnsupportedDurability **до создания**, source/binding сохраняются. После начала
+неоднозначного IO результат CommitUnknown/CopyUnknown/SwitchUnknown, артефакт
+Unverified, не подтверждённая копия и не основание retention/delete. Успешный
+probe не доказывает power-loss. При сбое вне гарантированного диапазона модели
+восстановление из сохранённых копий; физическое стирание флеш не обещается.
+
+Один ResourceOwner держит FD, advisory lock, writer lease и счётчик in-flight IO.
+Process Mutex + interprocess lock на весь writable lifetime; другие handles того
+же файла нельзя закрывать так, чтобы снять POSIX lock. Close ровно владельцем,
+после quiescence. Перед T сверять headers/generation/size; external change —
+Conflict, stop writer. Advisory lock не CAS против несотрудничающего приложения;
+две копии с одним containerId не синхронизируются автоматически. После потери
+grant/reselect проверить identity и profile, пустой файл на месте пропавшего
+не создавать. Persist только реально выданные permission flags.
 
 ## 5. Единая транзакция записи T
 
-Объекты и индексные страницы immutable. Ни одна операция T не перезаписывает
-достижимые данные прежнего согласованного состояния. Внутри одного writer:
+T обслуживает обычную одну открытую зону: save/folder/metadata/settings/hint,
+move/trash/restore/clear, а также create/add zone. ChangeSecret и compact — §8,
+не малые T в исходник. Immutable COW/records не меняют старые достижимые ranges.
 
-1. Проверить session token, доступ, лимиты, writer lease и исходный generation.
-   Валидировать всю массовую команду до создания нового состояния. Зафиксировать
-   immutable snapshot/revision редактора; новые правки уже имеют следующий revision.
-2. Добавить новые AEAD records и изменённые пути encrypted COW индекса, новый root
-   открытой зоны; обновить публичный COW-каталог recordId → physical offset/hash.
-   Закрытый descriptor и его catalogue root переносить из исходного snapshot.
-3. fsync FD. На ошибке header не менять, новые данные считать мусором.
-4. Сформировать весь inactive superblock: generation+1, committedLength до конца
-   новых данных, новый descriptor текущей зоны с MAC; второй логический descriptor
-   побайтно прежний. Записать полностью через pwrite, fsync FD.
-5. Повторно прочитать header и новые страницы/records, проверить hashes, MAC/AEAD
-   открытой зоны, структуру нового root и revision. Читать через тот же удерживающий
-   lock FD; не закрывать вспомогательный FD так, чтобы снять process-wide POSIX lock.
-   Только тогда вернуть `Committed(generation, revision)`.
+1. Проверить session/capability, writer lease, expectedZoneSeq/revision, generation
+   и лимиты. Массовую команду валидировать целиком; snapshot редактора immutable.
+2. Append новые AEAD records, COW indexes/root, catalogue. zoneSeq текущей зоны+1;
+   opId/recentOperations по format§5. Другой logical descriptor/catalogue прежний.
+   Это инкремент существующей изменяемой зоны: при Create/Add новая зона начинает
+   с zoneSeq=1/recentOperations=[], а Add не меняет seq/root основной зоны.
+3. fsync данных. На ошибке header не публиковать; orphan tail не commit.
+4. Сформировать полный inactive header: generation+1, новый committedLength и
+   свой MAC; другой descriptor прежний. Полный pwrite, второй fsync.
+5. Через тот же lock-owning FD перечитать header/новые pages/records, проверить
+   hash/MAC/AEAD/root/revision. Только после этого Committed(generation,zoneSeq,
+   revision,objectId). Для create дополнительно DurableCreateIdentity.
 
-Момент подтверждённого сохранения — успешный шаг 5 после обоих fsync. Dirty снимается
-только для подтверждённого revision; правки, поступившие позднее, остаются dirty.
-Если шаг 4/5 завершился неоднозначно, результат `CommitUnknown`, а не Saved:
-запретить дальнейшие записи, перечитать при восстановлении, сопоставить revision.
-Новое состояние может оказаться записанным несмотря на ошибку ответа.
+Dirty сбрасывается только для ACK revision N; N+1 остаётся dirty. Ошибка/timeout
+при header write/force/readback — CommitUnknown, дальнейшие writes запрещены до
+reread/reconciliation. Целый неACKed header может пережить crash и стать текущим;
+torn/hash-invalid slot не кандидат. Hash-valid newest с плохим referenced root
+даёт CorruptData, не тихий fallback. Password failure никогда не выбирает старый
+slot/URI. Явное recovery старого snapshot предупреждает о старом пароле/данных.
 
-После прерывания: старый или новый полный superblock указывает на согласованное
-дерево. Некорректный по hash/torn header не кандидат; записанный, но неподтверждённый
-полный header может быть выбран при следующем открытии. Хвост вне committedLength
-игнорируется и никогда не интерпретируется как завершённая транзакция. Перед новым
-append хвост допустимо обрезать только после выбора исправного snapshot и fsync;
-при неподдерживаемом truncate — оставить gap и append в фактический EOF.
+Хвост вне committedLength игнорировать; truncate только после исправного snapshot
+и fsync, иначе gap/append в фактический EOF. Нет inplace free-list reuse. ENOSPC,
+quota, short read/write, EIO, grant loss — ошибка/Unknown, без ложного Saved и
+с последним подтверждённым revision. Preflight free space приблизителен.
 
-Два согласованных header не означают две версии пароля для входа: вход пробует
-только envelope выбранного новейшего состояния. Неудача пароля не запускает поиск
-старых envelope. Политика обнаружения повреждения и явного recovery — в формате.
+| Операция T | Атомарная область |
+| --- | --- |
+| Create | Один новый документ: случайные IDs/ZDK, пустые root/trash/settings/index, generation1, slot B нулевой; до ACK не активировать |
+| Add decoy | Main-only, повторный main old secret, новый секрет дважды/inequality, независимый ZDK, zoneCount1→2; main logical bytes/records прежние; неизвестную существующую decoy не reset |
+| Save note | Устойчивый заранее выданный objectId, DTO+metadata+index/root; новый FullyEmpty не создаётся, existing empty сохраняется |
+| Move/trash/restore/clear | Вся нормализованная группа/edges/index одним T, cycles/depth/stale reject целиком; restore overflow по формату |
+| Metadata/settings/hint | Только подтверждённые изменения; не менять contentModified от cursor/color/move; нет неявной замены unknown enum/icon |
 
-## 6. Операции и точки фиксации
+OpId выдаёт coordinator для exact immutable request и привязывает в памяти к
+epoch/zone/expectedZoneSeq/command. Повтор с иным payload — InvalidOperationToken.
+RecentOperations256 — hint выполненного op, а не полный ACK/digest. Только живой
+неизменный token может получить cache ACK/reconciliation без повторного эффекта.
+После restart, потери token/окна — UnknownOperation/Conflict, чтение objectId и
+revision; новая destructive команда требует новой проверки/подтверждения/opId.
+Бессрочного exactly-once нет; plaintext команд для этого на диск не сохранять.
+Create/Add Unknown разрешается чтением заранее выданных document/zone IDs и
+zoneCount; не создавать повторный файл/вторую decoy автоматически, не reset
+существующей зоны. После потери token безопасный отказ остаётся допустимым.
 
-Все операции ниже используют T и возвращают его результат; до фиксации UI не
-сообщает об успехе. Параллельные команды одной зоны сериализованы.
+## 6. Сессия, завершение и foreground
 
-| Операция | Что входит в одну транзакцию | Прерывание / подтверждение |
-| --- | --- | --- |
-| Создать контейнер | Новый уникальный документ, случайные container/instance/zone ID, ZDK, envelope, пустые root/trash/settings, generation 1; slot B нулевой | До проверки первого header — незавершённый файл, не активировать; после T файл самодостаточен |
-| Добавить фальшивую зону | Основная сессия + повторная проверка основного пароля; новый секрет дважды и неравенство; новый ZDK/envelope/root; zoneCount 1→2 | Основная зона сохраняет descriptor/records; до commit второй зоны нет; неизвестный старый фальшивый не заменяется |
-| Сохранить заметку | Обновлённый note DTO, metadata, индекс и root; existing ID стабилен | Первый пустой draft не создаёт объект; существующая пустая сохраняется; Saved только T |
-| Папка/metadata/settings | Новая запись, COW paths, root | Нет частичного изменения имени/цвета/настроек |
-| Переместить/в корзину | Вся нормализованная группа, все parent edges, индекс; содержимое потомков не копировать | До T всё прежнее, после T вся группа перенесена |
-| Восстановить всё | Recovery folder, все корни деревьев из trash и overflow в корень | Корзина опустошается вместе с новым деревом одним T |
-| Очистить корзину | Новый root без ссылок на всё trash subtree | Удаление логическое; старые ciphertext остаются до compact |
-| Сменить пароль/способ | Повторно открыть текущий envelope старым секретом, сравнить ZDK; проверить новый против другой зоны; свежие salt/nonce/envelope, inputMethod, hint, descriptor MAC и маленький root с zoneSeq+1 | Note/media records и ZDK прежние; новый пароль действует после T; другая зона неизменна |
-| Сменить фальшивый пароль | В основном режиме отдельно проверить текущий фальшивый; временно получить только его ZDK и проверить новый против основного envelope | Основной ZDK не восстанавливает забытый фальшивый; при забытом отказ, без reset/удаления |
-| Backup | Writer barrier, snapshot generation/committedLength, побайтовая копия завершённого префикса в новый уникальный файл, fsync и полная проверка | Копия подтверждена только после readback; исходник не меняется |
-| Compact | Проверенная backup, новый уникальный файл, live set открытой зоны и всё catalogue закрытой, новые physical catalogues, новые headers | Старый файл не перезаписывается; кандидат подтверждается readback, переключение URI отдельно |
-
-Действительный старый пароль требуется даже при уже открытой зоне. Управление
-паролями обеих зон доступно только из основного режима по концепции. Открытие
-фальшивой зоны не предоставляет команды add/change password. При временной проверке
-другой зоны её заметки/UI не загружаются. Ключ очищается после операции.
-
-Даты и пустота задаются форматом (§7), а не поведением no-op hook текущего UI.
-Неизменённый snapshot не создаёт новую content revision. ID первого draft назначать
-однократно перед попыткой commit, повторный запрос с тем же opId не создаёт дубль.
-
-ENOSPC, quota, EIO, short write и потеря grant: прекратить writer, не трогать старый
-root, показать ошибку с последним подтверждённым revision. Проверка свободного места
-приблизительна и не заменяет обработку ошибки. При fsync/readback failure возможен
-CommitUnknown. Незавершённые кандидаты помечать в локальном noBackup journal URI/opId,
-без открытого содержимого; на старте не выбирать их по одному имени/mtime.
-
-Потеря неподтверждённого: все правки после последнего Committed. При штатной работе
-это обычно интервал 7 с плюс очередь/IO, но верхней временной гарантии при зависшем
-provider, ошибке записи или kill нет. onStop не гарантирован системой. Для background
-нельзя обещать обязательное сохранение последних символов до принудительного kill.
-
-## 7. Сессия, системные окна и настройки
-
-Состояния координатора:
+UI access и IO lifetime — разные состояния:
 
 ```text
-NoContainer --select/create--> Locked --password--> Open
-Open --mutation--> Saving --Committed--> Open
-Open/Saving --background/screen off/close--> Closing --> Locked
-любое IO --failure--> Error --reselect/reopen/recover--> Locked
-Locked --choose other--> NoContainer
+Locked -> OpenMain/OpenDecoy -> Saving
+OpenMain -> Maintenance(Auth/Preflight/Backup/Build/Verify/Switch)
+loss foreground/cancel -> AccessRevoked + UI Locked
+ResourceOwner: Busy -> StopRequested -> Quiescent -> Released
+неоднозначный outcome -> ReconciliationRequired (запись запрещена)
 ```
 
-Error содержит код/безопасную диагностику и последний generation, не текст/ключи.
-При закрытии сначала немедленно перекрыть UI, очистить thumbnails/dialogs/selection,
-отключить редактор и медиа; запретить новые команды; snapshot последних правок
-передать writer; после commit/error уничтожить ключи и plaintext из сессии.
-Сохраняющий worker может кратко владеть ключом до завершения T; «контент уже скрыт»
-не означает «в памяти уже нет ключа». Установить ограниченный grace period (гипотеза
-2 с): если нельзя завершить, отменить до commit либо получить CommitUnknown и
-закрыть FD. Блокирующий provider изолировать cancellable IO; не удерживать сессию
-открытой бесконечно. Очистка managed String/IME/GC не доказывает физическое стирание RAM.
+При отзыве немедленно скрыть note/list/media/диалоги/thumbnails, FLAG_SECURE=true,
+инвалидировать пользовательский epoch и pending callbacks. Новых команд нет.
+В той же сериализованной границе допускается заранее принять один final immutable
+checkpoint последних правок как ClosingSave; он либо уже текущая T, либо максимум
+один последний snapshot после неё. Это узкая внутренняя save capability, не
+продолжение пользовательской сессии/обслуживания. Нельзя поздним callback создать
+новый ClosingSave. Неподтверждённые правки могут потеряться при kill/IO error;
+период7с плюс очередь не верхняя временная гарантия.
 
-Rotation пересоздаёт Activity с тем же memory-only ViewModel и session epoch;
-не закрывает доступ. Home, screen-off и реальная потеря foreground закрывают.
-Скрытие выполнять при потере видимости/foreground, не полагаться только на поздний
-onStop; учесть multiwindow и screen-off receiver. При возврате сначала Locked,
-даже если Closing worker ещё заканчивает IO. Повторный вход ждёт окончания writer.
+Отдельно запросить остановку service/KDF/traversal и кооперативных работ.
+Timeout (ориентир2с только для UX ожидания) и coroutine cancel **не доказывают**
+окончание pwrite/fsync/Argon2. Не закрывать FD в другом потоке для фиктивной
+отмены. Владелец ждёт реального возврата syscalls, не начинает следующие шаги
+без разрешённой capability, разрешает Unknown и только затем снимает lock/lease
+и закрывает FD. Нельзя начать второй writer/вход с доступом к данным, пока owner
+не quiescent и исход не разрешён. Возврат пользователю — Locked/«запись завершается»,
+не разблокированный редактор. При зависшем IO конечного срока освобождения всех
+ключей не обещать; жёсткая изоляция процесса — будущая отдельная проверенная мера.
 
-Picker — отдельная подоперация с operationId/sessionEpoch/expectedState. Перед её
-запуском из открытой сессии завершить требуемое сохранение и заблокировать сессию.
-Операции создания/открытия из Locked остаются в Locked, у них свой token.
-ACTION_CANCEL/RESULT_CANCELED ничего не меняет. Home/screen-off/закрытие процесса
-инвалидируют token; поздний URI игнорировать, FD закрыть, не брать persistable grant,
-не импортировать и не переключать контейнер. Сам переход в наш picker допускает
-ожидаемый результат только для ещё активного token и нужного состояния; после
-блокировки прежней открытой сессии любые media-result требуют нового входа и
-новой команды. Чужую Activity принудительно закрывать не требуется. Внешняя пустая
-заготовка, созданная picker до отмены, не считается готовым контейнером.
+Уничтожать ненужные buffers немедленно, используемые handles/caches/scratch keys
+в finally после последнего использования/IO. Зануление ByteArray не доказывает
+физического удаления всех String/JVM/IME/crypto-engine копий. Maintenance plaintext
+не попадает в main repository/UI; late result лишь обновляет outcome, не открывает
+контент и не принимает новый switch. Ключи не пишутся в journal/state/temps.
 
-| До входа | Локально на устройстве (noBackup) | Только внутри зашифрованной зоны |
-| --- | --- | --- |
-| Выбрать/создать/импортировать файл, способ ввода, показать открытый hint, язык, About | Последние container URI и tree URI, grants Android, предпочтительный способ ввода, provider profile, journal кандидатов, выбранный instanceId | Сортировка/вид, rememberFolder и lastFolderId, запрет screenshots/copy, настройки зоны, trash, pin counter, cursor |
-| Нет доступа к trash, паролям и zone settings; FLAG_SECURE включён | Никаких title, preview, текста заметок, списка объектов, password или ZDK | В фальшивой зоне скрыты управление шифрованием и backup; правила хранения одинаковы |
+### 6.1. Точная политика Android
 
-В заголовке до входа допустимы container/VFS envelope versions, но noteVersion
-и zone schema достоверно известны после открытия зоны. Если концепция требует
-их в About до входа, показывать «недоступно», не предполагать версии содержимого.
-После входа применить zone screenshot setting; при блокировке сразу FLAG_SECURE=true.
-Clipboard/share/process-text/drag отключены по default zone policy; безопасные
-ограничения применить к native EditText и accessibility actions в следующем этапе.
-Автоматическое возобновление заметки не делать: вход открывает remembered folder
-или root, cursor применяется только при последующем открытии самой заметки.
+Открытый доступ допустим только когда наше окно видимо, экран interactive, наша
+Activity top-resumed и не начат отзывающий переход. Focus — дополнительный сигнал,
+а не единственный lifecycle callback. Состояние пересчитывает coordinator:
 
-До реальных данных: allowBackup=false; в backup_rules и data_extraction_rules
-исключить root/file/database/sharedpref/external и device_* аналоги для cloud-backup
-и device-transfer, проверив допустимые domains Android XML. Рабочие encrypted
-кандидаты/journal держать в noBackupFilesDir, plaintext temps отсутствуют. Явно
-задокументировать, что app backup rules не управляют общим SAF-файлом и чужими
-копиями. Проверить OEM device transfer; allowBackup=false один недостаточен для
-обещания отсутствия переноса. Не использовать rememberSaveable, SavedStateHandle,
-Bundle, persisted WorkManager Data, logcat/crash attachments для текста и ключей;
-выключить autofill/content capture персональных полей, не сериализовать spans.
+| Событие | Политика |
+| --- | --- |
+| Home, screen-off/device lock, потеря visibility, уход top-resumed к другому приложению | Немедленно revoke/hide; в multiwindow вторая RESUMED Activity не сохраняет доступ |
+| Неопознанная потеря window focus, notification shade/system permission dialog | Revoke консервативно; возврат требует входа |
+| Зарегистрированный собственный modal dialog/меню, обычная IME при видимой top-resumed Activity | Не revoke только от фокуса; UI policy и screen-off/top-resumed проверки продолжаются |
+| Rotation/resize configuration handoff | Тот же memory ViewModel/epoch и worker, без второго запроса/сохранённого plaintext; не считать фоновым переходом. Home/screen-off во время handoff всё равно revoke |
+| Own picker | Сначала принять нужный checkpoint и revoke сессию; picker получает отдельный Locked operation token, а не ключи |
 
-## 8. Копии, миграции и уплотнение
+onStop/isChangingConfigurations недостаточно: Android multi-resume может оставить
+оба окна RESUMED. Не полагаться на единственную Activity callback. Для permission
+dialog и notification shade не вводится исключение, которое продлевает доступ.
 
-Backup замораживает writer на весь copy, поэтому даже два изменяемых header имеют
-один согласованный snapshot. Копировать ровно committedLength, не случайный EOF.
-Уникальное имя с UTC timestamp и random suffix, никогда не overwrite единственной
-исправной. Полный streaming SHA-256 source/destination + длина + повторное открытие
-и разбор обеих зон/catalogues; AEAD всех достижимых блоков открытой зоны. Для закрытой
-зоны проверяется точность копии и hashes, не знание её пароля. Это не удостоверяет
-отсутствие уже существующей порчи: сообщать ограничения, при обнаруженной порче
-не ротировать исправные копии. Автоматическая retention: минимум три проверенные
-копии; удалять старейшую только после новой проверки, не единственный известный
-исправный экземпляр. Если для третьей копии нет места, прежние не удалять ради записи.
+Picker token = opId/Locked epoch/expectedState/purpose. RESULT_CANCELED — без
+применения. Home/screen-off/process death инвалидируют token, поздний URI:
+закрыть FD, не импортировать, не брать persistable grant, не переключать binding.
+Штатный valid result может сохранить выбранный tree grant в Locked настройке,
+но не возобновляет прежнюю main session/maintenance; новый вход и новая команда.
+Rotation token сохраняет только в memory, чужую Activity принудительно не закрывает.
+Пустая внешняя заготовка picker не готовый контейнер.
 
-Миграции отдельно version container/zone/note. До любой миграции — verified backup.
-Зону мигрировать только с её ключом; вторую logical descriptor/records сохранить.
-Неизвестный major/container required feature — весь файл read-only/unsupported;
-неизвестная zone schema — эта зона read-only; неизвестная note version сохраняется
-opaque, запрещены её изменение/миграция, разрешено побайтовое копирование. Миграция
-container envelope, не требующая ключей, может перестроить physical catalogues,
-но не MAC-поля закрытой зоны; иначе отложить до получения её пароля. Отсутствие
-поддержки нужной закрытой версии не разрешает переписать её «как v1».
+## 7. Настройки, редактор и отсутствие утечек
 
-Compact = перенос в новый файл, не сжатие криптографических данных кодеком.
-Порядок: writer barrier → проверенная копия → traversal открытой зоны → новый
-файл. Из открытой зоны перенести только reachable записи, включая trash и settings;
-из закрытой — ВСЕ записи её публичного catalogue, включая недостижимые старые.
-Перенос ciphertext побайтовый, без новых nonce и без изменения root refs/MAC;
-изменяются только physical каталоги. Публичный каталог нельзя считать доказательством
-live set закрытой зоны. Старые envelopes/records в закрытой зоне могут остаться.
+| Место | Допустимое содержимое |
+| --- | --- |
+| До входа | Select/create/import, preferred input, открытые hint/версия envelope, язык/About; нет trash/password/zone settings |
+| App-private noBackup | URI/tree grants, preferred input, provider profile, binding+journal identity/стадии; нет текста/title/preview/password/ZDK |
+| Зашифрованная зона | Сортировка/вид, rememberFolder/lastFolderId, screenshot/copy policy, trash/counters/dates/cursor; каждая зона самостоятельна |
 
-После полной проверки candidate (закрытая зона: count/recordId/hash multiset и
-логический descriptor совпадают с source; открытая: AEAD/дерево) fsync/close/reopen.
-Оба header кандидата описывают тот же snapshot; generation source+1, instanceId
-новый, containerId прежний. Затем координатор атомарно сохраняет локальную привязку
-URI/instanceId и сообщает новый путь. До этого выбран старый; при сбое оба исправны,
-на старте journal предлагает законченный candidate, но не заменяет файл молча.
-Старый файл и verified backup сохраняются; удаление старого — отдельная явная
-команда после проверки и показа нового пути. Не нужен rename/replace и не
-обещается стабильность исходного URI. Если нельзя создать/проверить новый файл,
-уплотнение отменяется. Команда compact доступна обеим зонам в разделе корзины;
-скрытие ручного Backup UI в decoy не отменяет обязательную автоматическую копию.
-Для неё использовать настроенный device backup tree; если его нет/нет доступа,
-в рамках compact явно выбрать папку копии либо отменить операцию. Не требовать
-основного пароля для этой копии. Нужное место: исходник + backup + кандидат + запас IO;
-чистая экономия места появится после отдельного удаления старого файла.
+В decoy скрыты и запрещены координатором ChangeSecret/add zone, manual Backup,
+compact и выбор другого контейнера. Core keyless copier может быть симметричен
+в тестах, это не право user-session. UI settings принимают fallback unknown enum/
+icon без автоматической перезаписи raw value. Вход открывает remembered folder
+или root, не редактор; cursor применяется только при открытии note.
 
-Смена пароля меняет envelope текущего состояния, не отзывает старые snapshot,
-второй header, backup и внешние копии. Удаление/compact не гарантирует физическое
-стирание флеш-памяти. Закрытая зона не уплотняется полностью без её открытия;
-этот предел явно показывать в результате операции.
+Текущие NoteDocument paragraphs/todo/styles UTF-16 сохраняются без NFC/HTML/spans.
+Storage DTO добавляет ID/title/icon/dates/revision/cursor отдельно; текущее UI не
+расширяется в docs-only этапе. Unit NoteSaveHook не ACK. Подключение позднее:
+immutable snapshot+async result, dirty только на подтверждённый revision,
+ошибка не маскируется закрытием. FullyEmpty и content/metadata dates — format§7.
 
-## 9. Решено, измерить, остаётся открытым
+До пользовательских данных: allowBackup=false и явные exclusions root/file/
+database/sharedpref/external/device_* для cloud/device transfer в обоих XML,
+проверить допустимые Android domains/OEM. Общий SAF файл и чужие копии backup
+rules не контролируют. Journal/encrypted scratch в noBackup, keys только RAM;
+готовый portable candidate в явно выбранном SAF destination. Ни SavedStateHandle,
+Bundle/rememberSaveable, WorkManager Data, logs/crash attachments, plaintext temps
+для контента/ключей. Native EditText/Compose: secure recents, autofill/content capture,
+clipboard/share/process-text/drag/accessibility gates; один isSaveEnabled=false
+не закрывает эти каналы. Перед входом и при revoke FLAG_SECURE=true; после входа
+zone policy, но служебный decoy plaintext не отображается даже в main screenshots.
 
-Проектные решения этапа 1: объектный append-only формат; два независимых ZDK;
-одна активная зона; canonical S1; AEAD и KDF выше; T; COW индексы; закрытая зона
-переносится целиком; compact с новым URI; без облачной прямой работы. Это спецификация,
-не отчёт об испытанном движке. Прототип не должен выбирать эти основы заново.
+## 8. Копии и общий протокол обслуживания
 
-Рекомендации для измерений: KDF 64 MiB/3/1; chunk 1 MiB; metadata page 16 KiB;
-кэш 8 MiB; grace period 2 с. Структурные размеры/ограничения v1 уже нормативны;
-производительность размеров ещё не измерена. Изменение бинарных полей требует
-правки спецификации до создания совместимых пользовательских файлов.
+### 8.1. Backup и гарантии копии
 
-Действительно открытые release gates: какая версия BC пройдёт Android-проверки;
-какой KDF profile выберут по реальным замерам; какие authority/version локальных
-provider подтвердят fsync/crash contract; независимое криптографическое и format
-review. Если provider не проходит, писать через него нельзя; основное решение
-не заменяется автоматически staging/import. Облачный backup и медиа UI вне прототипа.
+Backup под writer barrier копирует ровно committedLength выбранного S, не EOF,
+в уникальный файл UTC timestamp+random suffix, никогда поверх здоровой копии.
+Длина/full streaming SHA source/destination, parse обоих catalogues/ranges,
+force/reopen и DurableCreateIdentity обязательны до VerifiedCopy. В обслуживании
+VerifyAll AEAD/refs обязателен для target/selected зон с проверенными ключами;
+для unselected — точность bytes/hashes относительно source, не доказательство
+отсутствия уже внесённой порчи/потери catalogue entry. Наличие borrowed main key
+при decoy-only не превращает main в selected и не требует её reachability traversal.
+При ручном backup открытая поддерживаемая зона проверяется AEAD, closed — keyless;
+неизвестная closure не объявляется crypto-verified. Границы проверки сообщаются.
+Случайная порча обнаруживается hashes, намеренная подмена может их пересчитать.
+Подозрительная копия не вытесняет здоровую. Retention минимум3 проверенных,
+старейшая удаляется только после новой проверенной и не единственной исправной;
+не удалять прежние ради места. Хранить verification coverage по zoneId в безопасной
+метаинформации копий; relative-only copy не повышает health и не вытесняет последнюю
+копию с более сильной известной AEAD-проверкой. Maintenance создаёт одну новую backup и сохраняет
+source и эту backup; их удаление отдельно. Import/Restore не перезаписывают source.
 
-## 10. Проверенные внешние источники
+### 8.2. MaintenanceCoordinator: один snapshot и результат
 
-Ссылки проверены 18 октября 2026; они обосновывают свойства библиотек/API,
-но не доказывают работоспособность нашего будущего формата.
+Общий автомат compact/ChangeSecret, с одной новой backup и одним candidate.
+Доступ только main, включая прямой dispatch/deep-link/старую capability.
+Стадии и ответственность:
 
-* [Argon2, RFC 9106](https://www.rfc-editor.org/rfc/rfc9106.html) — Argon2id и test vectors.
-* [BC API](https://downloads.bouncycastle.org/java/docs/bcprov-jdk15to18-javadoc/org/bouncycastle/crypto/generators/Argon2BytesGenerator.html),
-  [загрузки](https://www.bouncycastle.org/download/bouncy-castle-java/),
-  [лицензия](https://www.bouncycastle.org/licence.html) — готовый Argon2 и кандидат Java-артефакта.
-* [SQLCipher Android](https://www.zetetic.net/sqlcipher/sqlcipher-for-android/),
-  [лицензии](https://www.zetetic.net/sqlcipher/license/),
-  [SQLite atomic commit](https://www.sqlite.org/atomiccommit.html) — зрелый альтернативный движок и условия его транзакций.
-* [ContentResolver.openFileDescriptor](https://developer.android.com/reference/android/content/ContentResolver),
-  [DocumentsProvider](https://developer.android.com/reference/android/provider/DocumentsProvider.html) — режим FD и provider-specific поведение; rename не является универсальным atomic replace.
-* [Android Auto Backup](https://developer.android.com/identity/data/autobackup) — правила backup и device transfer.
+| Стадия | Обязательные действия / отказ |
+| --- | --- |
+| AuthorizeMain | Проверить OpenMain/epoch первым действием, до picker/KDF/резервирования. Из decoy отказ без запроса main secret/предложения обслуживания |
+| Destinations | Read-only проверить заранее полученные grants/profiles source+backup+candidate и DurableLocalState. Если нужны picker/grants — закрыть main, настроить в Locked, затем новая main-команда; старые keys/выбор не продолжать |
+| Credentials | Compact selected decoy: её current secret до backup/reservation/candidate. ChangeSecret: old target, new twice, inequality другой зоны, новый S1≠old. Проверять expected zoneId/role+MAC/root, не общий успешный login. Ошибка/отмена/unsupported — ноль artifacts, source/binding прежние |
+| Confirm | Показать точный выбор/target/destinations, retained files, старую защиту source/backup при rekey и место; окончательное подтверждение до IO создания |
+| DrainAndFreeze | Запретить новые команды обеих зон, завершить pending save, разрешить CommitUnknown либо остановиться. Захватить exclusive maintenance lease на весь оставшийся workflow, проверить исходную identity/envelopes после credential проверки. Если изменились — отказ и новая проверка/подтверждение. Зафиксировать один immutable S |
+| Preflight | С ключами полностью проверить reachable schemas целевых/selected зон; неподдержанные зависимости — отказ до backup. Проверить полный публичный каталог unselected, лимиты, grants/profiles/free space; для rekey подготовить новый ZDK/envelope в RAM до artifacts. Ничего не переводить автоматически в partial |
+| Backup | Одна VerifiedCopy всего S по8.1. Failure/CopyUnknown — stop, source и binding прежние |
+| BuildCandidate | Из пустого уникального документа построить один новый файл по8.3/8.4; запрет всех save/add/password/migration/другого maintenance до окончания lease |
+| VerifyCandidate | Проверить framing/ranges, обе зоны целиком в требуемых гарантиях, hashes/AEAD/closure, данные/IDs/даты, force/reopen+namespace durability. Candidate identity+build manifest совпадают; source всё ещё S |
+| PrepareSwitch | Долговечно journal CandidateVerified/затем SwitchIntent, source/candidate fingerprints. Повторно проверить current main epoch, lease, grants, source/candidate identity/freshness; no uncoordinated replacement |
+| AcceptSwitch | Короткая сериализованная граница с Revoke: если revoke раньше, не принимать switch. Если accept раньше, логическое решение выбрать verified candidate уже принято до блокировки; передать одному IO-owner durable публикацию binding+journal, без долгого UI mutex |
+| ResolveAndClose | Только подтверждённый durable Activated даёт MaintenanceCommitted/new password changed. Error/Unknown — Locked и reconciliation. На всех выходах StopRequested→Quiescent→Released, owner cleanup. Даже успех закрывает старую сессию в Locked; следующий вход отдельно, late callback не открывает UI |
+
+Main-only запуск не означает знание main secret у keyless helper: при decoy-only
+низкоуровневый copier main сохраняет без main key, хотя coordinator авторизован
+основной сессией. Main handle может быть borrowed; old/new target ZDK и второй
+independently unwrapped handle принадлежат отдельному context. Держать минимальные
+decrypted pages, encrypted scratch с временным ключом, не общий UI repository.
+Выбранная decoy не открывается пользовательски; KDF/queues/caches/closures и crypto
+engine copies включены в cleanup. При rekey service временно владеет старым и
+новым target ZDK — это не доступ основного пароля к забытой decoy.
+
+### 8.3. ChangeSecret: новый ZDK и новый URI
+
+Только целевая зона перешифровывается, другая целиком opaque. После current-target
+verification/new twice/inequality и freeze S создать новый случайный ZDK32,
+salt16/wrapNonce12 и envelope нового секрета. Новый ZDK/envelope обязательно подготовить в RAM до резервирования/backup;
+ошибка KDF/RNG этой стадии не создаёт artifacts. После проверки новой обёртки
+очистить Kraw/Kwrap/S1, оставить только нужные handles. Не хранить secrets в journal.
+RNG failure новых record IDs/nonce уже во время build отменяет весь candidate,
+а не обещает отсутствие ранее созданной backup.
+
+Перешифровать bottom-up все reachable media/note chunks, chunk-list pages,
+objects/settings, children/objects indexes и root. На каждом новом ciphertext
+свежие recordId/nonce и Krecord нового ZDK, новые hashes/LogicalRefs. Сохранить
+object/zone/virtual-root IDs, содержание, styles/todo, props/dates/objectRevision,
+cursor/counters/recentOperations. Target zoneSeq+1 — единственная обязательная
+служебная revision; другая seq прежняя. ContainerId прежний, instanceId новый,
+generation=S+1. Полный новый catalogue цели содержит только новые reachable IDs,
+без прежних obsolete/old envelopes. Build manifest и нулевые gaps покрывают весь
+candidate до EOF=committedLength, не copy source prefix/header. Оба slot одинаковы
+и содержат только новый target envelope; records другой зоны побайтно прежние,
+descriptor[0..16] прежний, physical catalogue rebuild. Старые target records/headers
+остаются в отдельно retained source/backup, не в рабочем candidate.
+
+Verify: полная логическая эквивалентность цели (кроме seq/envelope/refs), все target
+AEAD новым ZDK; отказ старого ZDK на каждом новом target ciphertext; отсутствие
+old target IDs/old envelope и orphan old ranges. Сам old-key negative не заменяет
+проверку новых данных. Открыть оба пароля после переноса на чистый instance в тесте;
+в работе чужой пароль для copy не требуется. Добавленные позднее данные также
+используют только новый ZDK. Объявлять «пароль изменён» лишь MaintenanceCommitted.
+При ошибке до AcceptSwitch прежний URI/пароль; после принятия неопределённый
+durable исход — SwitchUnknown с явным разрешением. Нельзя автоматически открыть
+source старым паролем как будто смены не было.
+
+### 8.4. Selective compact
+
+Main пользователь выбирает main/decoy/both, обе существующие выбраны по умолчанию;
+main-only файл не предлагает decoy, empty selection запрещён. Decoy-only всё равно
+из main. Проверить selected decoy secret именно против decoy до artifacts; main
+secret в этом prompt не успех. Неверный/забытый/cancelled secret не запускает
+частичный main-only: можно вернуться, явно снять decoy и подтвердить новую команду.
+
+Selected zones копировать по полной известной Reachable closure с их ключами,
+включая trash/settings. Unselected — все записи текущего public catalogue, в том
+числе obsolete, без её ключа. Ciphertext selected/unselected не перешифровывать:
+IDs/nonce/hash/LogicalRefs/logical descriptors прежние. Physical catalogues для
+новых offsets rebuild, не побайтный copy старых pages. ContainerId прежний,
+instanceId новый, generation=S+1, zoneSeq прежние, оба header одинаковы.
+Проверить selected AEAD/ссылки/logical snapshot и unselected recordId/raw-hash
+multiset+logical descriptor; один final switch только после проверки **всего**
+файла. Ошибка между зонами/VerifyAll — отказ всей операции, source binding прежний.
+Новое разрешение обслуживания не требует новых layout полей: offsets/instanceId
+исключены из record AAD/Krecord и catalogueRoot из logical MAC (format§2).
+
+### 8.5. Journal, switch и отмена
+
+Одна durable noBackup запись совместно содержит binding и journal:
+version/opId/kind/target-or-selection; source URI/containerId/instanceId/generation/
+committedLength+SHA обоих headers; backup URI/hash/length; candidate URI/новый
+instanceId/generation/length/header fingerprint/full hash; stage/outcome и
+предыдущее binding. Поля до появления файла null. URI/ID/hash/выбор допустимы,
+password/S1/ZDK/plaintext/криптографические engine states запрещены. Upper bounds
+на URI/record length и checksum metadata проверяются до allocation. Checksum не
+защищает от rollback ОС, journal не подменяет проверку файлов.
+
+Стадии: Prepared → BackupVerified → Building → CandidateVerified → SwitchIntent
+→ Activated; либо Aborted/Unverified/ReconciliationRequired. Prepared записывается
+только после credentials/confirm/freeze/preflight, не до проверки паролей.
+Каждая durable запись
+атомарна по§4. До AcceptSwitch ошибка/cancel/revoke сохраняют прежнее binding.
+Нельзя снять lease после backup/первой зоны. После AcceptSwitch отмена не обещает
+«ничего не изменилось»: durable запись может быть старой/новой/неизвестной.
+Home скрывает UI/отзывает дальнейшие действия сразу, но не отменяет уже принятое
+до него решение. Позднее завершение сохраняет только outcome; не принимает новый
+switch, не показывает успех/decoy и не разблокирует сессию. Если ACK нельзя
+достоверно доставить, показать при следующем явном входе Pending/Unreported и
+разрешить его, а не молча продолжить работу в candidate.
+
+После restart/reconciliation проверить целостность local state, identity source/
+candidate, grants/profile, source freshness и повторно candidate в нужных гарантиях.
+Verified flag не доверен без reread. Если нужны уничтоженные ключи — новый явный
+вход/ввод нужного секрета (после rekey для candidate нужен **новый** секрет).
+Old source и candidate предлагаются как разные пути/варианты защиты. Не угадывать
+по имени/mtime/containerId, не reexecute ChangeSecret или повторно создавать backup
+по одному opId. Изменённый source/stale candidate — Conflict и явное решение;
+потерянный grant — AccessLost. Неизвестный durable binding — SwitchUnknown,
+writer запрещён. Подтверждённый source либо Activated candidate разрешается
+явно; отменённый/unverified candidate не становится активным сам. Source и
+verified backup сохраняются при всех отказах; cleanup только собственных
+незавершённых artifacts по journal, не единственной здоровой копии.
+
+### 8.6. Место и версии
+
+Отчёт compact: selected/processed zones, S/C, S−C, retained source+backup и новый
+путь. При source S и новой backup S суммарно2S+C, прирост S+C; после удаления
+одного source остаётся S+C. C=S/C>S — допустимый честный результат. Учитывать
+старые copies, encrypted scratch, partial artifacts, reserve IO и различие
+logical length/physical allocated. Reclaim неизвестной unselected не угадывать.
+Rekey может требовать больше места/IO; прежние копии ради него не удаляются.
+
+Текущий формат строго1.1; прежний draft1.0 не поддержан для записи. Готовых
+файлов движка в repo/доступном workspace не обнаружено; внешние файлы пользователя
+не исследованы. Новых полей для compact/rekey не нужно, но minor0→1 явно отделяет
+согласованные S1/folder/enums от прежнего draft. Unknown required/container
+version — отказ записи всего файла. Unknown selected reachability — отказ всей
+операции до backup, без fallback; unselected opaque copy разрешён только при
+понятных внешних descriptor/catalogue/record framing и поддержанных envelope1/S1/KDF/record1 обеих зон; unknown plaintext невыбранной не интерпретировать. Не предполагать relocation policy неизвестного envelope. Порчу не закреплять writer.
+Recovery исправной зоны — отдельный read-only алгоритм format§4.1. Migration
+отдельна, только известный переход+verified backup, не автоматически при compact.
+
+## 9. Готовность и экспериментальные условия
+
+P1 можно реализовывать по фиксированному формату1.1 и golden fixtures отдельным
+заданием. Это не production approval. Далее небольшие P1…P6 из prototype plan
+с условиями входа; не выполнять всё приложение одним запуском. Правки Gradle,
+SDK/minSdk/Java/зависимостей не входят в этот docs-only PR.
+
+Открыты именно измеряемые gates: Unicode16 implementation/conformance, crypto
+artifact/API31/R8/advisories, KDF p50/p95/RSS/thermal/OOM; device root/volume IO,
+namespace и local-state durability; неотменяемый IO/lock lifetime; worst-case
+VFS/traversal/scratch; lifecycle/IME/leak/OEM backup. Производственный provider
+allowlist пуст. Нет нерешённого выбора модели rekey/compact/S1: эти правила выше
+нормативны. Artwork icon palette и локализованная UI сортировка будущие продуктовые
+расширения, не повод менять fixed wire IDs/enum в реализации по умолчанию.
+
+## 10. Первичные источники
+
+* [Unicode16/UAX15rev56](https://www.unicode.org/reports/tr15/tr15-56.html),
+  [UCD16.0.0](https://www.unicode.org/Public/16.0.0/ucd/) — закреплённые NFC/repertoire.
+* [RFC9106](https://www.rfc-editor.org/rfc/rfc9106.html),
+  [RFC5869](https://www.rfc-editor.org/rfc/rfc5869.html),
+  [NIST GCM](https://csrc.nist.gov/pubs/sp/800/38/d/final) — готовые примитивы/vectors.
+* [BC downloads](https://www.bouncycastle.org/download/bouncy-castle-java/),
+  [license](https://www.bouncycastle.org/licence.html) — candidate artifact/notices,
+  не Android-сертификат.
+* [close(2)](https://man7.org/linux/man-pages/man2/close.2.html),
+  [fsync(2)](https://man7.org/linux/man-pages/man2/fsync.2.html) — окончание IO/namespace.
+* [ContentResolver](https://developer.android.com/reference/android/content/ContentResolver),
+  [DocumentsProvider](https://developer.android.com/reference/android/provider/DocumentsProvider),
+  [multi-resume](https://developer.android.com/develop/ui/views/layout/support-multi-window-mode#multi-resume),
+  [Auto Backup](https://developer.android.com/identity/data/autobackup) — API/lifecycle,
+  не доказательство свойств конкретного provider/OEM.

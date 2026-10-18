@@ -1,6 +1,13 @@
-# Copper Scroll: формат контейнера v1
+# Copper Scroll: формат контейнера 1.1
 
-Статус: нормативная спецификация прототипа, не реализованный формат.
+Статус: согласованная нормативная спецификация прототипа, редакция 2 от 18 октября 2026.
+Текущая wire-версия: containerMajor=1, containerMinor=1; envelope/record/zone/note=1.
+Движок и пользовательские файлы в репозитории отсутствуют. Прежний draft 1.0
+с неоднозначными S1/folder/enums не является второй допустимой спецификацией 1.1.
+Reader этой редакции не пишет в draft1.0 и не угадывает его правила; допускается
+только явное побайтовое копирование без заявления о проверке содержимого.
+Автоматическая миграция из не выпускавшегося draft не проектируется.
+История и совместимость: [решения проверки](container-review-resolution.md#совместимость-и-существующие-файлы).
 Обоснование и Android-протокол: [container-design.md](container-design.md).
 Слово «должен» задаёт инвариант будущего writer/reader. Криптопримитивы готовые;
 собственная здесь только упаковка данных и протокол транзакций.
@@ -37,7 +44,7 @@ shortest integers, без maps/tags/floats/indefinite items/duplicate fields, UT
 | Catalogue entries на зону | ≤16777216; страницы fanout≤128, height≤8 |
 | Encrypted B+tree | fanout≤64, height≤8; per-page budget 16 KiB важнее fanout |
 | RAM чтения медиа | 1 chunk + metadata page cache ≤8 MiB + постоянные буферы; не зависит от размера файла |
-| KDF | Только профили §3, один worker, максимум два slot последовательно на один submit |
+| KDF | Профили §3, один worker; не более двух Argon2 на один submit, последовательно; отдельные current/new submit обслуживания не складываются в одно ограничение |
 
 Это совместимые пределы v1, а не результаты stress/benchmark. Исчерпание лимита
 не разрешает writer оставить половину операции. Размеры проверяются до decrypt,
@@ -70,12 +77,12 @@ committedLength … EOF   незавершённый хвост/gaps, не ча�
 | --- | --- | --- |
 | 0 | 8 | ASCII `CSCRL001` |
 | 8 | 2 | containerMajor=1 |
-| 10 | 2 | containerMinor=0 |
+| 10 | 2 | containerMinor=1 |
 | 12 | 4 | requiredFeatures=0; неизвестный bit → запрет записи |
 | 16 | 8 | generation, 1…2^63−1 |
 | 24 | 8 | committedLength |
-| 32 | 16 | containerId, неизменен при обычной работе/copy/compact |
-| 48 | 16 | instanceId, новый для compact, прежний при byte-copy |
+| 32 | 16 | containerId, неизменен при обычной работе/copy/compact/rekey |
+| 48 | 16 | instanceId, новый для compact/rekey, прежний при byte-copy |
 | 64 | 1 | zoneCount |
 | 65 | 7 | reserved=0 |
 | 72 | 4096 | descriptor main |
@@ -88,7 +95,7 @@ committedLength … EOF   незавершённый хвост/gaps, не ча�
 НЕ является MAC и НЕ удостоверяет личность writer. Нет общего header key.
 generation — счётчик снимков всего файла; zoneSeq — отдельный счётчик зоны.
 Нулевой B после создания — не валидный slot. Равные generation допустимы только
-при побайтно одинаковых headers (созданный compact candidate); иначе CorruptHeader.
+при побайтно одинаковых headers (проверенный compact/rekey candidate); иначе CorruptHeader.
 Два валидных slot с разными containerId/instanceId — CorruptHeader, не «два контейнера».
 
 ### 2.2. Descriptor зоны, CBOR array из 18 полей
@@ -119,8 +126,11 @@ info=ASCII("CS-desc-v1\0")||zoneId, L=32)`.
 Сравнение MAC constant-time готовой библиотекой. MAC привязывает текущий root,
 role, password envelope и hint; физические адреса намеренно исключены, чтобы
 переместить закрытую зону без её ключа. Он не подтверждает глобальный generation
-или наличие другой зоны. Полный replay старого корректного snapshot не обнаружим
-только по переносимому файлу; доверенного внешнего монотонного счётчика нет.
+или наличие другой зоны. Как полный replay, так и подстановка старого корректного descriptor/catalogue
+одной зоны при актуальной другой не обнаружимы по одному переносимому файлу.
+Публичный generation не доказывает свежесть пары зон. Добавление его в оба MAC
+потребовало бы чужого ключа при каждой обычной записи и здесь не применяется.
+Доверенного внешнего монотонного счётчика нет.
 
 `PhysicalRef = [offset:uint64, byteLength:uint32, sha256:bytes32]`.
 `LogicalRef = [recordId:bytes32, rawSha256:bytes32, kind:uint,
@@ -143,10 +153,15 @@ Payload = `[zoneId:bytes16, entries:array]`.
   кроме bulk-built конечной страницы. Reader не требует заполненности для безопасности.
 
 Catalogue содержит ВСЕ committed records зоны, включая устаревшие. Обычный commit
-только добавляет новые keys и COW paths, не удаляет старые entries. Closed-zone
-compact копирует весь её catalogue и все перечисленные records; он не может
-сам определить, какие записи уже не нужны. Open-zone compact строит catalogue
-только из reachable LogicalRef; old snapshots остаются в сохранённом исходнике/backup.
+только добавляет новые keys и COW paths, не удаляет старые entries. При selective compact выбранные зоны с отдельно полученными ключами переносятся
+по полной достижимости известных схем; невыбранная — всеми entries/records,
+без её ключа. Выбор не равен открытой UI-зоне: при decoy-only main невыбранная.
+При rekey только целевая зона полностью перешифровывается по достижимости,
+другая переносится целиком. Raw records и descriptor[0..16] невыбранной зоны
+побайтно прежние; physical catalogue pages/descriptor[17] перестраиваются.
+Каталог не является доказательством live set или криптографической полноты
+уже подменённого source. Старые snapshots остаются только в source/backup;
+неперенос целевых obsolete records при rekey обязателен.
 
 Offset/length только locator: caller сверяет recordId/zoneId/kind, hash из LogicalRef
 и AEAD. Подмена публичного locator без ключа не создаёт валидного содержимого.
@@ -192,19 +207,44 @@ nonce (96 случайных бит); проверяется отсутстви�
 
 ## 3. Пароли, нормализация и envelope
 
-S1 возвращает bytes, которые НЕ включают способ ввода. inputMethod — UI-подсказка,
-а не отдельное пространство паролей. Проверка входа использует введённый тип для
-валидирования/кодирования и пробует оба envelope независимо от сохранённого типа.
+### 3.1. Канонический секрет S1 (secretEncodingVersion=1 в container1.1)
+
+S1 возвращает bytes без типа ввода. inputMethod — UI-подсказка, а не отдельное
+пространство паролей; вход кодирует введённый тип и пробует оба current envelope.
+Фиксированы **Unicode 16.0.0, NFC по UAX #15 revision56** и таблицы UCD16.0.0:
+UnicodeData, DerivedNormalizationProps и CompositionExclusions (включая алгоритм
+Hangul). Нельзя использовать меняющуюся системную NFC/Character.isDefined.
+Исполнитель должен поставлять эти данные либо доказать точное соответствие
+закреплённой версии; при отсутствии normalizer — UnsupportedSecretEncoding,
+без KDF, записи и fallback на другую нормализацию.
+
+Для text перед NFC и после неё допускаются только Unicode scalar values,
+General_Category которых по UCD16.0.0 не Cn и не Cs; это исключает unassigned,
+noncharacters и суррогаты. Private-use Co разрешены. NUL/CR/LF запрещены.
+Новые символы, назначенные после16.0.0, не принимаются S1 даже на новой ОС.
+Ни trim, ни case-fold, ни NFKC не выполняются. Сначала ограничить raw ввод
+1024 code points/4096 UTF-8 B, затем проверить repertoire, NFC и окончательные
+1…256 code points/1024 B. Границы относятся к code points, не UTF-16 units.
+Malformed UTF-16/UTF-8 отвергается, не заменяется U+FFFD. Проверка repertoire
+входа не даёт нормализации превратить недопустимый ввод в допустимый.
 
 | Способ | Каноническое значение S1 |
 | --- | --- |
-| PIN4/PIN6 | Ровно 4/6 ASCII цифры U+0030…0039; bytes UTF-8, ведущие нули не терять; не преобразовывать в число и не принимать локальные цифры |
-| Text | Валидные Unicode scalar values; NFC; UTF-8; не trim, не менять регистр, не NFKC; 1…256 code points и ≤1024 B после NFC; NUL/CR/LF запрещены |
-| Pattern | Сетка 3×3, точки 1…9 слева направо, сверху вниз; 4…9 уникальных точек; bytes ASCII их номеров без разделителей |
+| PIN4/PIN6 | Ровно4/6 ASCII цифр U+0030…0039; UTF-8, ведущие нули сохранены; не число и не локальные цифры |
+| Text | Правило UCD16.0.0/repertoire/NFC выше, затем строгий UTF-8 |
+| Pattern | Сетка3×3; точки1…9 слева направо сверху вниз;4…9 уникальных принятых точек; ASCII номеров без разделителей |
+
+Golden S1 vectors и отказы: [s1-vectors.json](reconciliation-materials/s1-vectors.json).
+В частности U+11382 U+113C9 и U+11383 обе дают UTF-8 `f0918e83`;
+U+0378 отвергается. Это намеренное отличие от произвольной NFC старой ОС.
+Две независимые реализации с данными16.0.0 должны исполнить эти vectors и полный
+[NormalizationTest16.0.0](https://www.unicode.org/Public/16.0.0/ucd/NormalizationTest.txt).
+Выбор Android-библиотеки/её conformance — gate P1, правило S1 уже определено.
+Нормализация заметок к S1 отношения не имеет.
 
 Для pattern переход через невыбранную среднюю точку автоматически добавляет её
-перед конечной (1→3 даёт 123; 1→9 даёт 159). Если средняя уже выбрана — не добавлять;
-повторное касание выбранной точки игнорируется; конечная уже выбранная не добавляется.
+перед конечной (1→3 даёт 123; 1→9 даёт 159). Если конечная точка уже выбрана, весь hit игнорируется до midpoint.
+Если средняя уже выбрана — не добавлять; повторное касание выбранной точки игнорируется; конечная уже выбранная не добавляется.
 Обрабатывается порядковый список попаданий в точки, а не координаты/скорость/плотность
 экрана. Правило midpoint: средняя существует, если обе координаты среднего целые
 и лежат на сетке. Конечная последовательность сохраняется только как временный
@@ -227,8 +267,8 @@ wrapAAD = deterministic CBOR array `["CS-wrap-v1", containerId, zoneId, role,
 zoneEnvelopeVersion, inputMethod, secretEncodingVersion, kdfId, argonVersion,
 memoryKiB, iterations, parallelism, salt]`.
 wrappedZDK = AES-256-GCM(Kwrap, wrapNonce, plaintext=ZDK32, AAD=wrapAAD).
-Каждый rewrap получает новый salt16 и nonce12; ZDK данных не меняется. Не сохранять
-Kraw/Kwrap между сессиями. Envelope собственной зоны хранит ТОЛЬКО её ZDK.
+При create/add/rekey envelope получает свежие salt16 и nonce12. При rekey
+сам ZDK также новый. Не сохранять Kraw/Kwrap между сессиями. Envelope собственной зоны хранит ТОЛЬКО её ZDK.
 
 При входе пробовать все поддерживаемые envelope последовательно, даже если первый
 совпал, чтобы обнаружить запрещённое совпадение обоих. Если открылись два —
@@ -241,17 +281,67 @@ root hash/AEAD, zoneSeq/schema/invariants до Open. Неверный tag envelo
 отдельные ошибки без запуска KDF. Повреждённый/неподдерживаемый второй envelope
 не блокирует read-only доступ к исправной зоне, но запрещает изменение паролей.
 
-Для смены старый секрет повторно открывает выбранный current envelope; полученный
-ZDK constant-time равен текущему. Новый секрет дважды; попытка с ним открыть
-другую зону должна достоверно не совпасть, при её исправном поддерживаемом descriptor.
-Другая зона не получает новый salt/envelope. Пароль меняется только после T;
-свой zoneSeq увеличивается и создаётся новый маленький root с тем же VFS/settings.
-Изменение метода с тем же S1 своей зоны допустимо; против другой зоны равенство
-по-прежнему запрещено. Нового общего быстрого verifier не добавлять.
+### 3.2. Смена секрета и предпочтительного ввода
+
+`ChangeSecret(targetZoneId)` доступна только из main через общий протокол
+обслуживания design§8. Старый секрет повторно открывает именно current envelope
+целевой зоны; ZDK constant-time сравнивается с открытым handle, если он уже есть.
+Новый секрет вводится дважды, S1 сравниваются constant-time. Равенство новому S1
+прежнего S1 возвращает UnchangedSecret без файлов; это не «быстрая смена».
+Новый S1 проверяется против envelope другой зоны: достоверное несовпадение при
+понятном поддерживаемом descriptor обязательно. Порча/unsupported/ambiguous
+результат блокирует операцию. Main не восстанавливает забытый decoy. Без чужого секрета нельзя доказать
+криптографическую исправность его envelope; inequality относится к current
+поддерживаемому представлению без обнаруженной порчи, не восстанавливает
+повреждённый пароль. Известная порча блокирует операцию.
+
+До резервирования/создания файлов подготовить в RAM независимый случайный ZDK
+цели, свежие salt/wrapNonce, выбранные KDF параметры и envelope нового секрета;
+ошибка этой подготовки оставляет ноль artifacts. Kraw/Kwrap/S1 после проверки
+новой обёртки очистить. Затем verified whole-file backup и один новый контейнер
+с новым URI. Перешифровать **весь достижимый граф** цели:
+trash/settings/root/индексы/objects/note и media chunks. Для каждого шифрования
+новые recordId/nonce, Krecord из нового ZDK; IDs не совпадают ни с source, ни
+с уже созданными candidate IDs. Снизу вверх перестроить все LogicalRef/hash,
+индексы, root и MAC. Не достаточно заменить ZDK/envelope в descriptor.
+
+Сохранить zoneId, normal/trash root IDs, object IDs, parent edges, содержимое,
+порядок styles, свойства, даты, objectRevision, cursor, settings, pin counter и
+recentOperations. Изменить только служебный zoneSeq цели на source+1; новый root
+содержит тот же seq: это идентификатор новой версии защиты для expectedZoneSeq,
+а не изменение содержимого/дат объектов. InputMethod/hint/envelope меняются по подтверждённому запросу.
+Другая зона сохраняет ZDK, envelope, logical descriptor[0..16] и все raw records
+своего каталога без своего пароля, с новыми physical offsets при необходимости.
+containerId остаётся, instanceId новый, global generation source+1 без wrap.
+
+В целевом каталоге кандидата ровно новые reachable records; целевые старые
+records/envelopes не копировать. Строить из пустого уникального документа,
+не копировать source headers/диапазоны целиком. Обе полностью новые одинаковые
+superblock содержат только новый target envelope. EOF=committedLength;
+build manifest покрывает все records/pages/нулевые alignment gaps. При ошибке
+build не продолжать append с orphan records: отказ всей операции. Проверить
+AEAD/ссылки/логическую эквивалентность цели и полную побайтную сохранность другой
+зоны, отсутствие target old record IDs и old envelope в обоих slots.
+
+Пароль считается изменённым только после проверки всего кандидата и
+подтверждённого долговечного переключения URI. До принятия switch ошибка/cancel
+оставляет source и старый пароль; SwitchUnknown разрешается явно по design§8.
+Старый ZDK не открывает ciphertext цели в новом файле и её будущих записях
+при неизвестном новом секрете. Старые plaintext и копии не отзываются: source
+и backup по-прежнему доступны старым паролем; удаления/стирания флеш не обещать.
+Rewrap прежнего ZDK как пользовательская смена секрета запрещён.
+Неполная/неизвестная reachability schema цели — UnsupportedVersion до backup/candidate.
+
+`SetPreferredInputMethod` меняет только локальное noBackup-предпочтение панели
+ввода, не descriptor/envelope/ZDK и не пароль. Оно не конвертирует секрет:
+другим методом можно войти лишь при том же S1. Descriptor.inputMethod фиксирует
+способ при последнем create/add/ChangeSecret, локальный выбор его перекрывает.
+Если изменились S1 bytes, даже вместе со способом, требуется ChangeSecret с
+новым ZDK. Отдельного пользовательского «rewrap-only» режима нет.
 
 ## 4. Выбор снимка и безопасное открытие
 
-1. Ограниченно прочитать два фиксированных slot; проверить magic/версии/flags,
+1. Ограниченно прочитать два фиксированных slot; проверить magic/major1/minor1/flags,
    длины, SHA, reserved, zoneCount и descriptor encodings. Неподдерживаемый
    hash-valid более новый major не обходить открытием старого writable snapshot.
 2. Выбрать наибольший generation среди hash-valid поддерживаемых slot. Если один
@@ -271,12 +361,39 @@ ZDK constant-time равен текущему. Новый секрет дваж�
 5. До writable — gate provider/lock/conflict из design. Проверить индексы/дерево
    открытой зоны; на обнаруженной порче не делать «пустой root» вместо неисправного.
 
-На случайной невалидной второй descriptor/каталоге допускается только отдельный
-read-only recovery исправной зоны; writer не закрепляет порчу другой зоны.
-Неиспользованные bytes/gaps не искать на предмет «похожих на пароль» slots.
-Полный rollback, удаление одной зоны с пересчётом публичного header или порча
-недоступных records не предотвращаются без ключа/внешнего доверия; такая атака
-может разрушить доступность, но не раскрывает ZDK второй зоны.
+### 4.1. Явный RecoverZoneReadOnly
+
+Обычный reader проверяет обе зоны, а при чужой порче предлагает отдельную команду
+recovery. Она не запускается автоматически вслед за password mismatch.
+
+1. Пользователь выбирает slot/generation и role зоны. Минимальное общее framing:
+   два фиксированных slot доступны, у выбранного SHA верна, magic/major1/minor1,
+   flags/reserved поддержаны, generation/committedLength в пределах actual size,
+   containerId/instanceId ненулевые, zoneCount1/2 включает выбранную role.
+   Для одинаковых generation с разными headers или конфликтующих IDs — отказ,
+   не угадывание. Если нет hash-valid поддерживаемого framing — внешняя копия,
+   не сканирование произвольных bytes. Старый slot — только отдельный явный выбор
+   с предупреждением о старом пароле/состоянии, не тихий fallback.
+2. По фиксированному offset выбранной role разобрать **только её** bounded CBOR
+   descriptor/padding, проверить zoneId/role/лимиты/KDF и собственные refs.
+   Чужой descriptor/CBOR/catalogue не является обязательной зависимостью recovery.
+   Нельзя игнорировать порчу общего framing, относящиеся к своей зоне ошибки
+   или выход своих refs за committedLength.
+3. Изолированно проверить свой catalogue/root locator; unwrap current envelope,
+   MAC/root AEAD/seq/schema, затем bounded граф выбранной зоны. Выдавать plaintext
+   только после проверки соответствующей записи. Непрочитанный media не называть
+   проверенным; отдельный VerifyAll выявляет его порчу. Для неполного дерева
+   не создавать пустые objects/root; возвращать CorruptData/UnsupportedVersion.
+4. Результат только RecoverySession(readOnly). Никаких T, compact, rekey,
+   password change, миграции или записи в source. Разрешена точная отдельная копия
+   исходника с маркировкой порчи; не называть её восстановленным здоровым файлом.
+   Для записи восстановленных данных нужен отдельный будущий explicit export,
+   который эта редакция не объявляет реализованным.
+
+Публичные hashes не удостоверяют полноту уже подменённого чужого каталога.
+Удаление зоны, полное или зональное воспроизведение прежнего состояния и порча
+недоступных records могут разрушить доступность/свежесть без раскрытия другого ZDK.
+Неиспользованные bytes/gaps на «похожие» slots не сканировать.
 
 ## 5. Зашифрованный root и индексы зоны
 
@@ -287,9 +404,27 @@ objectsIndex:LogicalRef, childrenIndex:LogicalRef,
 settings:LogicalRef, nextPinSequence:uint64, recentOperations:array]`.
 normalRoot/trashRoot — разные неизменные IDs виртуальных узлов, не обычные папки.
 Обе зоны имеют собственные root, trash, settings и counter. zoneSeq равен descriptor.
-recentOperations ≤256 пар `[opId:bytes16, resultObjectId:bytes16-or-null]` для
-повторов после CommitUnknown. Долгий повтор вне окна сверяет expectedRevision и
-существующий objectId; не повторять destructive команду без повторной валидации.
+При create/add zone zoneSeq=1, nextPinSequence=1, recentOperations=[];
+normalRootId/trashRootId генерируются отдельно и различны.
+recentOperations ≤256 пар `[opId:bytes16, resultObjectId:bytes16-or-null]`.
+Обычная мутация существующей зоны T увеличивает её zoneSeq на1 и добавляет
+opId, вытесняя старейший при256. Create/Add инициализируют новую зону значениями
+выше; Add не меняет seq/root/main recentOperations.
+Coordinator выдаёт opId один раз на immutable request, связывая его в памяти с
+sessionEpoch/zoneId/expectedZoneSeq и точным command payload. Caller не меняет
+payload под старым opId. Тот же живой token/тот же payload может получить прежний
+cached ACK или reconciliation, но не новый побочный эффект. Иной payload —
+InvalidOperationToken. После CommitUnknown writer остановлен до reread.
+
+После restart/потери token либо вне окна256 не исполнять прежний request повторно:
+UnknownOperation/Conflict и чтение состояния/objectId/revision; для destructive
+действия нужна новая проверенная команда с новым opId и новым подтверждением.
+Membership recentOperations даёт AppliedHint(opId,resultObjectId), не доказывает
+состав старой команды и не восстанавливает полный ACK. Нельзя на его основании
+возвращать ложный Committed для нового payload. Дата/счётчики и ID первого draft
+не создаются повторно при разрешённом retry. Бессрочного exactly-once нет.
+Maintenance opId и исход switching хранятся в локальном journal design§8,
+а не в расширении этих пар; rekey сохраняет прежние пары и object IDs.
 
 Индексы — encrypted COW B+tree pages kind2 (ownerId=zoneId, ordinal=0),
 payload `[indexType:uint, level:uint, entries:array]`:
@@ -318,11 +453,30 @@ objectRevision:uint64, payload]`.
 Даты — signed epoch millis UTC, не доверенные security timestamps; display по
 timezone пользователя. Смена часов может дать более раннюю дату; ordering pin
 по counter, не wall clock. type 1=folder, 2=note, 3=image, 4=audio, 5=video.
-icon не задаёт type. Folder/media icons фиксированные идентификаторы; notes icon
-из стандартного набора, default `note`. Цвет uint32 ARGB сохраняет текущие 16
-значений ObjectColors без потери знакового Int (white=0xFFFFFFFF).
+icon не задаёт type. **Folder payload = null**, всегда CBOR `f6`, не пустой array.
+Object defaults: colorArgb=0xFFFFFFFF, pinned=false, pinSequence=null,
+objectRevision=1; ID/parent/type/name/dates задаются writer явно, не отсутствуют.
+При pinned=true pinSequence обязательно ненулевой uint64 <nextPinSequence;
+при pinned=false обязательно null. У folder pin запрещён (false/null).
+Цвет uint32 ARGB сохраняет текущие16 ObjectColors без потери знакового Int.
 
-Имя папки не blank по Unicode whitespace; сохранять введённые символы без trim,
+Стабильные iconId case-sensitive ASCII `[a-z][a-z0-9_-]{0,31}`:
+
+| type | Нормативный iconId/default | UI fallback |
+| --- | --- | --- |
+| folder=1 | `folder`, пользователь не меняет | folder |
+| note=2 | `note`; единственный выбираемый icon prototype1.1 | note для неизвестного допустимого ID |
+| image=3 / audio=4 / video=5 | `image` / `audio` / `video`, пользователь не меняет | соответствующий type |
+
+Набор рисунков заметок расширяется UI без изменения type; новые стабильные
+идентификаторы добавлять в таблицу перед предложением выбора. Для note неизвестный
+синтаксически допустимый ID читать и сохранять **как есть** при copy/rekey и
+не связанном редактировании; fallback не разрешает переписать его в `note`.
+Явное пользовательское действие выбора известного icon может его заменить.
+Для fixed folder/media несоответствующий ID — CorruptData в objectSchema1;
+неизвестный type/objectSchema — read-only/Unsupported, не угаданная note.
+
+Имя папки не blank по White_Space из Unicode16.0.0; сохранять введённые символы без trim,
 после проверки, не нормализовать имена ради уникальности. Совпадающие имена разрешены.
 Для note `name` — заголовок, один логический абзац без CR/LF, допускается пустой;
 для медиа будущий display name. Нет path-based идентичности, `..` — UI, не object.
@@ -370,6 +524,30 @@ screenshotsBlocked:bool=true, copyBlocked:bool=true,
 sortMode:uint=1, sortAscending:bool=true, viewMode:uint=1]`.
 lastFolderId при отключённом rememberFolder=null, при missing/trash ID вход в root.
 Никакие настройки второй зоны не копируются как настройки текущей.
+
+Все8 полей обязательны в wire array; defaults применяются при создании, не при
+чтении укороченного массива. sortMode/viewMode — uint32, значения:
+
+| Поле | Код | Значение |
+| --- | --- | --- |
+| sortMode | 1 (default) | По display title/name; note без title использует body, FullyEmpty — вычисляемое пустое название |
+| sortMode | 2 | По contentModifiedAt файлов, metadataModifiedAt папок |
+| sortMode | 3 | По icon/type, затем display title: note icon IDs в ASCII порядке, далее image, audio, video; folders отдельной первой группой |
+| sortMode | 4 | По RGB (`colorArgb & 0x00FFFFFF`), затем display title |
+| viewMode | 1 (default), 2, 3 | Список, иконки, миниатюры |
+
+Внутри display-title comparator — lexicographic Unicode scalar values без
+нормализации/case-fold; objectId unsigned bytes — последний tie-break.
+sortAscending меняет направление выбранного primary/composite ключа, но не порядок
+групп folders→pinned files→прочие и не pinSequence asc. В headless fixtures это
+воспроизводимый порядок; улучшение локализованной сортировки относится к будущему
+UI и должно быть явно согласовано, не менять сохранённый enum задним числом.
+Неизвестный uint32 sortMode/viewMode не интерпретировать как известный: отображать
+с fallback1, держать raw значение и сохранять при не связанных изменениях.
+Только явный выбор пользователем заменяет его известным кодом. Неверный тип/длина,
+версия settings≠1 — Unsupported/CorruptData, не default. Полные golden arrays:
+[wire-fixtures.json](reconciliation-materials/wire-fixtures.json).
+
 
 ## 7. Rich text v1 и совместимость с редактором
 
@@ -428,21 +606,51 @@ Sum lengths совпадает с byteLength. MIME не запускает вн�
 Base64 нет. Seek offset → ordinal → page → AEAD одного chunk. Не публиковать
 частичный plaintext chunk до проверки tag. Media UI/кодеки не входят в прототип.
 
-Свободное место v1 — не переиспользуемый внутри файла free list. Старые records,
-старые COW pages и незавершённый хвост считаются мусором. Его точный размер для
-открытой зоны вычисляется traversal, для закрытой reclaimable неизвестен.
-Нельзя объявлять весь неизвестный диапазон «свободным» или перезаписать закрытую
-зону. Reclaim только новым compact-файлом по design, с checked backup.
+Свободное место1.1 — не переиспользуемый внутри файла free list. Reclaim selected
+зон вычисляется только известным полным traversal с их ключами; unselected
+reclaimable неизвестен, её records нельзя перезаписать. Compact byte-copy живых
+records и rekey новым шифрованием используют новый файл и checked backup.
+Если source S, новая полная backup S, candidate C, итоговые logical file lengths
+равны2S+C, прирост S+C, candidate reduction S−C. Удаление одного source оставляет
+S+C, что ещё не экономия относительно S. Показывать retained source/backup,
+scratch/прежние copies/partial artifacts и различать logical length/allocated bytes;
+невозможность узнать физическое allocation не даёт права назвать S−C freed bytes.
+C≥S допустим, source/backup не удаляются автоматически.
 
 ## 9. Версии и наблюдаемость
 
-containerMajor/minor определяют envelope/records; zoneSchemaVersion — root/VFS;
-noteFormatVersion — отдельную заметку. Version приложения их не меняет.
-Неизвестные requiredFeatures/record versions не переписывать. Неизвестный note
-сохранять opaque через LogicalRef и byte copy, не подставлять пустой body.
-В v1 закрытый opaque descriptor можно сохранять при работе другой зоны лишь
-если внешнее framing/границы каталога понятны; неизвестный container envelope
-запрещает writer целиком. Перед migration/compact обязательно verified copy.
+containerMajor/minor1.1 определяют эту нормативную упаковку; zoneSchemaVersion
+и noteFormatVersion независимы. Version приложения их не меняет. Известны только
+requiredFeatures=0, envelope1/S1, record1, zone1/object1/settings1/note1/media1.
+Reader этой редакции поддерживает строго container1.1. Неизвестные minor/major
+или required bits запрещают writer **всего файла**, без автоматического отката
+к старому writable slot; допустимы отказ или явная точная opaque copy.
+
+Неизвестная zone/object/note/settings/record schema внутри своей зоны делает
+её read-only; не подставлять пустое содержимое. Компактируемая/перешифровываемая
+зона обязана иметь известную полную ref-closure. Preflight до backup/candidate
+обходит её известный граф; если полнота недоказуема — UnsupportedVersion всей
+операции. Не переходить автоматически к другой зоне, opaque partial compact или
+миграции. Новый выбор пользователь подтверждает отдельно.
+
+Невыбранную зону можно переносить без ключа при понятных descriptor framing,
+public catalogue/record framing/границах; opaque plaintext её неизвестной схемы
+не интерпретируется. Скопировать весь catalogue record set, raw bytes и logical
+descriptor, rebuild только physical pages. Для обслуживания этой редакции
+внешние zoneEnvelopeVersion1, secretEncodingVersion1, KDF profile и recordVersion1
+должны быть понятны и поддержаны у обеих зон; unknown external framing/MAC policy
+никогда не предполагает право менять catalogueRoot. Unknown plaintext zone/note
+schema невыбранной при этих условиях переносится целиком. Unsupported другой
+envelope также не позволяет честно проверить inequality при ChangeSecret;
+допустима отдельная точная raw copy всего файла без статуса healthy VerifiedCopy.
+Повреждение каталога/диапазона блокирует обслуживание, не закрепляется новым header.
+Полнота относительно source не доказывает исправность уже атакованной закрытой
+зоны; об этом предупреждать, подозрительная копия не вытесняет здоровую.
+
+Миграция — отдельная подтверждённая операция с verified backup и известным
+переходом схем, не неявная часть compact/rekey. Не изобретать migration fixture
+из production1.0, которого нет. Будущая схема может добавить явный стабильный
+reference envelope только через отдельную спецификацию и проверку совместимости.
 
 Открыто: header, container/instance/zone/record ID, role/count зон, inputMethod,
 KDF/salt/envelope/hint, generation/zoneSeq, catalogue offsets/hashes, kind/длина/
