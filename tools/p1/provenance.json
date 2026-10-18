@@ -1,0 +1,27 @@
+{
+  "artifacts_sha256": {
+    "cbor-0.9-sources.jar": "138702e72af4a6d53a2e6e6478351e7dc83355fb2d97d06890092b495f7cd528",
+    "cbor-0.9.jar": "5ef465c47e34c6b13f93ece2ff49e94b933d69cf9f172cc4997418303884da73",
+    "cbor-0.9.pom": "98a1e7ba10dd1b605e41855cbc6b079b90f2a501715d16b61789ab11fcf4783d",
+    "icu4j-76.1.jar": "732cdf18121b1642899da1f5e37e52cc7f48e3ec07fa737105d4603976781b33",
+    "icu4j-76.1.pom": "7a37060bc7fbeaed0bd15e19e27844900fa97c2cec968849ba77da9e26b8c590",
+    "unicodedata2-16.0.0-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl": "c042613e639dfb21ed024bf39079fe560974083efc5f14ae6efe0241fdfe0275",
+    "unicodedata2-16.0.0.tar.gz": "05488d6592b59cd78b61ec37d38725416b2df62efafa6a0d63a631b27aa474fc"
+  },
+  "normalization_test": {
+    "unicode": "16.0.0",
+    "unicode_mirror_commit": "4fd8eca90b30aa4c72543ccddb4c15d05becdf8d",
+    "raw_sha256": "d811971453e7075e1ad56fb1b301eece5aa80757b81f6156e74a1bfb3ae5ceb1",
+    "icu_mirror_sha256": "b216ba4b82d0b76c2213c5e2a000e642c52f1a945c46d717810202e05b6fad14",
+    "normative_rows_equal": true
+  },
+  "origins": {
+    "cbor": "https://repo.maven.apache.org/maven2/co/nstant/in/cbor/0.9/",
+    "icu4j": "https://repo.maven.apache.org/maven2/com/ibm/icu/icu4j/76.1/",
+    "unicodedata2": "https://pypi.org/project/unicodedata2/16.0.0/",
+    "normalization_test": "https://raw.githubusercontent.com/unicode-org/unicodetools/4fd8eca90b30aa4c72543ccddb4c15d05becdf8d/unicodetools/data/ucd/16.0.0/NormalizationTest.txt",
+    "normalization_test_icu": "https://raw.githubusercontent.com/unicode-org/icu/release-76-1/icu4c/source/data/unidata/NormalizationTest.txt",
+    "cbor_license": "https://raw.githubusercontent.com/c-rack/cbor-java/b7191a5ec8e94ec3828f0ec9aa33993fe51db450/LICENSE",
+    "icu_license": "https://raw.githubusercontent.com/unicode-org/icu/release-76-1/LICENSE"
+  }
+}
