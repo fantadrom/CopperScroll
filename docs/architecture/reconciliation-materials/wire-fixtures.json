@@ -1,0 +1,115 @@
+{
+  "container_version": "1.1",
+  "scope": "Synthetic CBOR components, not encrypted container files",
+  "fixtures": [
+    {
+      "id": "folder-minimal",
+      "schema": "folder",
+      "value": [
+        1,
+        {
+          "bytes": "11111111111111111111111111111111"
+        },
+        1,
+        {
+          "bytes": "22222222222222222222222222222222"
+        },
+        "Folder",
+        4294967295,
+        "folder",
+        false,
+        null,
+        0,
+        0,
+        0,
+        1,
+        null
+      ],
+      "cbor_hex": "8e01501111111111111111111111111111111101502222222222222222222222222222222266466f6c6465721affffffff66666f6c646572f4f600000001f6",
+      "schema_valid": true
+    },
+    {
+      "id": "folder-invalid-array-payload",
+      "schema": "folder",
+      "value": [
+        1,
+        {
+          "bytes": "11111111111111111111111111111111"
+        },
+        1,
+        {
+          "bytes": "22222222222222222222222222222222"
+        },
+        "Folder",
+        4294967295,
+        "folder",
+        false,
+        null,
+        0,
+        0,
+        0,
+        1,
+        []
+      ],
+      "cbor_hex": "8e01501111111111111111111111111111111101502222222222222222222222222222222266466f6c6465721affffffff66666f6c646572f4f60000000180",
+      "schema_valid": false
+    },
+    {
+      "id": "settings-default",
+      "schema": "settings",
+      "value": [
+        1,
+        false,
+        null,
+        true,
+        true,
+        1,
+        true,
+        1
+      ],
+      "cbor_hex": "8801f4f6f5f501f501",
+      "schema_valid": true
+    },
+    {
+      "id": "settings-all-known",
+      "schema": "settings",
+      "value": [
+        1,
+        true,
+        {
+          "bytes": "22222222222222222222222222222222"
+        },
+        false,
+        false,
+        4,
+        false,
+        3
+      ],
+      "cbor_hex": "8801f55022222222222222222222222222222222f4f404f403",
+      "schema_valid": true
+    },
+    {
+      "id": "settings-future-display-enums",
+      "schema": "settings",
+      "value": [
+        1,
+        false,
+        null,
+        true,
+        true,
+        99,
+        true,
+        77
+      ],
+      "cbor_hex": "8801f4f6f5f51863f5184d",
+      "schema_valid": true
+    },
+    {
+      "id": "note-icon-unknown",
+      "schema": "note-icon",
+      "value": "future_note",
+      "cbor_hex": "6b6675747572655f6e6f7465",
+      "schema_valid": true
+    }
+  ]
+}

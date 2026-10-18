@@ -1,163 +1,180 @@
-# Copper Scroll: задание на прототип контейнера
+# Copper Scroll: поэтапные задания на прототип контейнера1.1
 
-Статус: следующий отдельный этап реализации. В текущем PR только проектирование.
-Следовать [design](container-design.md), [формату](container-format-v1.md) и
-[матрице проверок](container-test-plan.md). Сохранить minSdk31, SDK37, AGP9.4.1,
-Gradle9.6.0, Java11 и текущую модель редактора. Не заменять рабочий UI демонстрацией.
+Статус: согласованные отдельные задания, реализация не начата. Основа:
+[design](container-design.md), [формат1.1](container-format-v1.md),
+[матрица проверок](container-test-plan.md), [решения R/C](container-review-resolution.md).
+Сохранить minSdk31/SDK37/AGP9.4.1/Gradle9.6.0/Java11 и текущую модель редактора.
+Этот этап меняет документацию/малые fixtures, не app/manifest/dependencies.
 
-## 1. Граница прототипа
+## 1. Организация работы
 
-Сделать headless storage engine, Android FD/SAF adapter и тестовый instrumented
-стенд без пользовательских данных. Создание/вход/save/move/trash/password/backup/
-compact/migration paths проверяются через API. Media пока только синтетический
-binary streaming path; галерея/запись/воспроизведение не реализуются.
-Подключение движка к обычному UI — отдельная часть после приёмки headless API,
-по отдельной ветке или следующему этапу. Нельзя незаметно вставить дисковую запись
-в нынешний Unit `NoteSaveHook` и считать dirty обработанным.
+Каждый P1…P6 — отдельное поручение, небольшая ветка/PR с измеримым выходом.
+Следующий этап начинается после приёмки нужного предыдущего, не всё приложение
+одним запуском Codex. Headless engine не подключать незаметно к Unit NoteSaveHook.
+Synthetic binary streaming входит; media UI/кодеки нет. Пользовательские файлы
+до device/security gates запрещены. Исторический отчёт не норма старого draft1.0.
 
-Обязательный минимум прототипа: один реальный `.cscroll`, две независимые зоны,
-парольная переносимость, rich text round-trip, T с fault injection, binary chunks,
-backup с полным readback, compact открытой зоны без ключа закрытой. Если часть
-не готова, этап не объявляется принятым; не выпускать пользовательские файлы
-нестабильного формата без обозначения experimental и плана совместимости.
+Core: `com.fantadrom.copperscroll.storage.{format,crypto,vfs,io}`, Android отдельно
+`storage.android`; без Compose/View/Activity внутри core. Можно оставить app module.
+Зависимости выбирать по совместимому artifact/license и фиксировать version catalog
+только в реализации; не менять SDK ради обхода проблем. Готовая CBOR-библиотека за
+strict schema adapter: адаптировать encoding к1.1, не wire к библиотеке.
 
-## 2. Модули и контракты
+## 2. Нормативные контракты API
 
-Разместить core в пакетах `com.fantadrom.copperscroll.storage.{format,crypto,vfs,io}`
-в текущем app (отдельный Gradle module пока не требуется). Android-specific SAF
-изолировать в `storage.android`. Вызовы engine с IO dispatcher, без Compose/View/
-Activity внутри codec/crypto/VFS. Single-writer coordinator сериализует команды.
-Готовая CBOR-библиотека, например kotlinx.serialization CBOR, за schema codec;
-до добавления выбрать опубликованную совместимую с текущим Kotlin версию, проверить
-Apache-2.0 notices и deterministic arrays/bytes на golden fixtures. Если библиотека
-не обеспечивает required encoding, написать строгий framing adapter, не менять wire
-format под библиотеку. Все новые зависимости фиксировать в version catalog.
-
-Планируемые типы (описание API, не готовый исходник):
-
-| Тип/интерфейс | Контракт |
+| Тип | Обязательство |
 | --- | --- |
-| `RandomAccessStore` | size, readFullyAt, writeFullyAt, appendAligned, force, truncateOptional, close; checked Long; full/short IO различимы |
-| `SafStoreFactory` | OpenOriginal/Create/ImportCopy раздельно; persist grants, provider gate, FD ownership/locks; не разрешает silent staging |
-| `ContainerReader` | readHeaders, selectSnapshot, supportedVersions, openZone, VerifyAll; никакой записи при попытке входа |
-| `ZoneSession` | Один ZDK и epoch; скрывает raw key; suspend mutate(expectedRevision, opId); close с отменой доступа |
-| `ContainerWriter` | Протокол T; closed descriptor opaque; append immutable pages/records; ACK после force/readback с удержанием lock |
-| `ZoneRepository` | get/list/saveNote/createFolder/moveBatch/trashBatch/restoreAll/clearTrash/settings; транзакции через writer |
-| `CredentialManager` | S1/Argon2/unwrap/old-check/equality/new-wrap, без общего двухзонного verifier |
-| `SnapshotCopier` | Writer barrier; уникальная копия, streaming hash/readback; return VerifiedCopy либо ошибка |
-| `Compactor` | Verified backup до работы; open reachability + closed full catalogue; returns VerifiedCandidate(newUri, instanceId), source retained |
-| `SessionCoordinator` | NoContainer/Locked/Open/Saving/Closing/Error и picker tokens; UI epoch отделён от writer lifetime |
-| `EditorStorageAdapter` | NoteData/NoteDocument↔StorageNoteDTO; snapshot revision, cursor focus; никаких spans/HTML/Base64 |
+| RandomAccessStore | Checked Long/full positional IO/appendAligned/force/truncateOptional; short IO различим; один ResourceOwner закрывает FD после in-flight quiescence |
+| ContainerReader | Framing/selectSnapshot/openZone/VerifyAll1.1; explicit read-only recovery отдельно от password failure |
+| ZoneSession | Один ZDK handle/epoch; mutate с expectedZoneSeq/revision/opId; без raw-key/toString; revoke запрещает новые пользовательские команды |
+| ContainerWriter | T append/COW→force→inactive header→force→readback→ACK; другая logical зона прежняя; Unknown запрещает writes |
+| MutationCoordinator | Выдаёт immutable token/opId, RAM binding к payload/expected seq/epoch; changed payload reject, lost token/outside window reconciliation без replay |
+| CredentialManager | Fixed S1/UCD16, whitelist, expected-target old verification/new twice/inequality; new secret всегда новый ZDK, no user rewrap-only |
+| ZoneRepository | Folder/note/batch/trash/restore/clear/settings, depth/parent/ID; editor semantics, raw unknown display enum/icon preservation |
+| SnapshotCopier | Snapshot-bound committedLength copy/hash/readback/namespace proof; keyless зона не называется AEAD verified |
+| MaintenanceContext | Borrowed/owned main/decoy и old/new target handles, lease, bounded pages/encrypted scratch; не UI repository; Stop→Quiescent→Released |
+| MaintenanceCoordinator | Main gate первым; destinations/credentials/confirm/drain/freeze/preflight/один backup+candidate/full verify/AcceptSwitch+durable binding |
+| Compactor | Selected main/decoy/both, default both; selected closure raw copy, unselected full catalogue; ZDK/zoneSeq прежние |
+| ZoneRekeyer | Новый target ZDK и bottom-up всех reachable records/refs/MAC, target seq+1; другая raw/logical зона прежняя без её key |
+| LocalStateStore | Одна atomic durable noBackup запись binding+journal, source/candidate fingerprints/stages; не SharedPreferences.apply ACK |
+| SafStoreFactory | OpenOriginal/Create/ImportCopy/RestoreCopy раздельно; profile root/volume/backend, ExistingWriteDurable отдельно от DurableCreateIdentity |
+| SessionCoordinator | UI epoch отдельно от IO owner; узкий заранее принятый ClosingSave; foreground таблица и Locked picker tokens |
+| EditorStorageAdapter | NoteData/NoteDocument↔StorageNoteDTO, stable ID/title/icon/dates/cursor, immutable revision snapshot+async ACK; не HTML/spans/Base64 |
 
-`MutationResult`: `Committed(generation, zoneSeq, revision, objectId)` /
-`NoOp` / `ValidationError` / `Conflict` / `ResourceLimit` / `AccessLost` /
-`IoFailure` / `CommitUnknown(lastConfirmed, attemptedOpId)` /
-`CorruptData` / `UnsupportedVersion`. Не возвращать успешный Boolean вместо
-неоднозначного IO outcome. Расшифрованные payload/key не включать в toString/errors.
+Ordinary results: Committed(generation,zoneSeq,revision,objectId), NoOp,
+ValidationError/Conflict/InvalidOperationToken/UnknownOperation/ResourceLimit/
+AccessLost/UnsupportedVersion/UnsupportedSecretEncoding/UnsupportedDurability/
+CorruptData/IoFailure/CommitUnknown. AppliedHint не полный ACK/Committed.
+Maintenance results: MaintenanceCommitted(newUri,instanceId,kind,selection-or-target,
+sizes), AbortedBeforeSwitch, CopyUnknown, SwitchUnknown, ReconciliationRequired/
+Unreported. После AcceptSwitch не возвращать «точно отменено» при неизвестном IO.
+Error/toString без secret/text/key. Credentials не data class, buffers memory-only,
+destroy/finally после последнего использования; физическое стирание JVM/IME не обещать.
 
-`Credentials` — ограниченный memory-only буфер; explicit destroy в finally,
-не data class с автоматически печатаемыми полями. ByteArray очищать, lifecycle
-managed String не обещает полного стирания RAM. KDF ограничен профилями, один worker.
-Cancellation до commit прекращает запись; после начала header update требуется
-разрешение исхода через reread, не ответ «отменено, точно ничего не изменилось».
+## 3. P1 — нормативные codecs, parser и fixtures
 
-## 3. Порядок реализации и выходные критерии
+**Вход:** приняты документы1.1 и однозначный S1. Движка/production1.0 файлов в repo
+нет; migration из них не придумывать.
 
-### P1. Golden codec и parser
+**Задача:** header/descriptor/record/catalogue/refs, strict CBOR схемы, folder null,
+enums/defaults/icons, ranges/overflow/overlap/cycles/budgets и unsupported policies.
+Выбрать поставляемый pinned UCD16 normalizer/repertoire. Системная версия NFC не
+норма. Artifact/license/data version и conformance — результат P1, не изменение
+самого S1. Независимый structural inspector только synthetic framing.
 
-Реализовать byte layouts header/descriptor/record/catalogue, CBOR схемы, refs и
-пределы формата. Добавить небольшие фиксированные hex/binary vectors и независимый
-инспектор структуры без ключей. Checked arithmetic и ресурсные бюджеты — до crypto.
-Выход: malformed corpus/fuzz не приводит к OOM/циклам; round-trip сохраняет bytes
-канонического формата; offsets/lengths layout совпадают с таблицами спецификации.
+**Выход:** codec-часть SCHEMA-01/03 и FILE-04/05, byte/repertoire-часть S1-01…04, точные
+[golden fixtures](reconciliation-materials/README.md), cross-codec чтение;
+полный Unicode16 NormalizationTest двумя независимыми реализациями с проверенными
+таблицами16.0.0. Fuzz/malformed bounded без OOM/hang/range escape. System Unicode15
+отклонён как неподходящий capability. Если normalizer не прошёл, P1 не принят.
+Это отдельное первое задание, а не запуск всего engine. Create/open часть
+S1-01/KEY-01 выполняется после P2/P3, unknown-selected maintenance SCHEMA-02 в P5;
+P1 не объявляет эти интеграционные ветви пройденными.
 
-### P2. Криптография и доступ
+## 4. P2 — готовые примитивы и независимые ключи
 
-Зафиксировать и проверить BC artifact (кандидат1.86 из design) на API31/release R8,
-не регистрировать provider; JCA AES/GCM. Выполнить known-answer vectors Argon2id,
-HKDF, HMAC, AES-GCM. Реализовать S1 и pattern midpoint, оба независимых envelope,
-MAC и record AAD, RNG failure, key cleanup и ambiguous match.
-Выход: KEY/CRYPTO P0; один файл переносим на другой instance/device без дополнительных
-секретов. Действительные KDF benchmarks отдельным отчётом, не хардкод «оптимально».
+**Вход:** P1 codec/S1 принят. BC1.86 кандидат, ещё не Android-сертификат.
 
-### P3. Транзакционное ядро
+**Задача:** JCA AES/GCM, BC lightweight Argon2/HKDF/HMAC без регистрации provider;
+known-answer vectors, fresh RNG/record keys, независимые envelopes, expected-zone
+unwrap, ambiguity и equality. Prepare нового target ZDK/envelope в RAM без engine IO;
+cleanup Kraw/Kwrap/credentials/handles/crypto states/caches в finally.
 
-Сначала JVM FileChannel/fault store, потом Android FD. Реализовать два slots,
-snapshot selection, append+COW+force+header+force+readback, опId/revisions,
-CommitUnknown, immutable каталог, bounded page cache. Метаданные root/каталога
-проверять прежде публикации сессии. Удаление записей внутри старого файла запрещено.
-Выход: TX/FILE P0 на каждой фазе T, без ошибочного Committed. Rewrap меняет envelope
-и descriptor, а также создаёт маленький новый root с увеличенным zoneSeq;
-note/media records и ZDK остаются прежними. Это не перешифрование пользовательских данных.
+**Выход:** KEY-06/07/09/10, credential-часть KEY-05 и primitive/record-часть
+CRYPTO-01…03 на pinned artifact, API31+ и release/R8; одинаковый вывод ключей
+между чистыми instances, KDF bounds/один worker/RNG failure. Полный файл KEY-01/02
+проверяется после P3/P4, полная смена KEY-04/05 — в P5b. Замеры p50/p95/RSS/
+thermal/OOM отдельно;64MiB/3/1 не объявлять оптимальным заранее.
 
-### P4. VFS и редакторный codec
+## 5. P3 — транзакционное ядро и модель отказов
 
-Objects/children encrypted B+trees; ID, root/trash, глубина, batch normalization,
-контроль cycles и parent invariants; папки/settings/pin counter. Сериализация
-NoteDocument из существующего кода, отдельный StorageNoteDTO с title/icon/dates,
-body chunks, focus UTF-16, empty rules. Не изменять семантику checked/null/styles.
-Выход: NOTE/VFS/TRASH P0/P1, randomized commands с независимой model oracle;
-save короткой note не меняет ciphertext существующих вложений.
+**Вход:** P1/P2; сначала JVM/fault-store без claims о произвольном SAF.
 
-### P5. Copy, compact, versions
+**Задача:** T/slots/seq/opId/revision/CommitUnknown, drain pending, single IO owner/
+lock/lease, отдельные AccessRevoked/Quiescent/Released. LocalStateStore моделирует
+file bytes и namespace раздельно; binding+journal одна transaction. Реализовать
+RecoverZoneReadOnly по своему MAC/каталогу и common framing, не old-password fallback.
+Неотменяемый blocking fake, не только cancellable delay; timeout не снимает lease.
 
-VerifiedCopy со stable snapshot и уникальным именем, retention policy; compact
-в новый документ без перезаписи исходного. Не требовать ключа закрытой зоны,
-сравнивать всё её catalogue records/hash set. Journal/noBackup содержит только
-URI/opId/стадию. Добавить migration dispatcher для известных версий и тестовую
-legacy fixture; не изобретать миграцию из несуществовавшего production формата.
-Выход: COPY/COMPACT/RESTORE/MIGRATE P0, candidate reopen; безопасное восстановление
-после crash вокруг локального переключения URI. Нет автоматического удаления source.
+**Выход:** core-части TX/RETRY/RECOVERY/DUR-01/03 на synthetic roots и каждой фазе T, old/new snapshot
+или Unknown, ни ложного ACK/replay/дубликата. После restart без live token нет
+автоматического destructive retry. Delayed syscall+revoke+второй процесс не создают
+двух writers, owner closes ровно раз. Полные VFS/media ветви этих ID допроверяются после P4/P5, device gates до P6.
+Проекции тестов перечислить в отчёте этапа, не помечать весь ID выполненным по части.
 
-### P6. Android adapter и security lifecycle
+## 6. P4 — VFS, редакторный codec и streaming attachments
 
-SAF read/write modes, probe отдельного scratch, grant loss/reselect, local provider
-profile. Настроить manifest backup и оба XML до работы с реальными данными;
-проверить cloud backup и device transfer. Сессия memory-only, background/screen-off
-hide-first, writer closing/timeout, rotation и picker token cancellation.
-Пока provider profile не доказан, запись через него недоступна; test-only adapter
-не выдаётся за production поддержку произвольного SAF provider.
-Выход: SAF/LIFE/LEAK P0 и измеренный список поддержанных authority/version, даже
-если он пока содержит только один локальный provider.
+**Вход:** P3, bounded parser/crypto/T. UI ещё session-only.
 
-## 4. Контракт будущего подключения к UI
+**Задача:** encrypted COW objects/children, stable ID/root/trash/depth63, batch
+normalization/restore overflow, settings/counters/raw enums/icons. StorageNoteDTO
+сохраняет nullable todo, ordered overlapping styles/UTF-16, empty/title/cursor/dates.
+Synthetic binary chunks/chunk lists streaming, без Base64. Unknown schema не пустой root.
 
-Нынешний `NoteSaveHook.onSaveRequested(NoteData, SaveReason): Unit` не способен
-передать async commit result. При отдельном подключении ввести request snapshot
-с noteId/revision/title/icon/cursor и async acknowledgement; период 7 с оставить.
-Снять dirty только для ACK revision, ошибка не закрывает редактор с сообщением
-об успехе. Для явного закрытия дождаться outcome или показать ошибку, для ухода
-в фон немедленно скрыть UI и закрыть сессию после ограниченного writer completion.
+**Выход:** VFS/TRASH/NOTE/MEDIA matrix с independent simple model oracle,
+randomized commands; short-note save не меняет media ciphertext/hashes. Измерить
+extreme validation/traversal/RAM/cache/scratch, не обещать million-object UX по fixture.
 
-Не восстанавливать plaintext через SavedStateHandle/Bundle/rememberSaveable;
-rotation использует ViewModel. Сохранённый cursor находится внутри note, на
-системный диск selection не сериализуется. Input title/date/unsaved indicator
-добавлять по концепции при отдельной интеграции, не в docs-only PR.
-Нужно будет обновить нынешние тесты, которые ожидают немедленного сброса dirty
-после hook: они подтверждают старое session-only поведение, не надёжность IO.
+## 7. P5 — копирование и обслуживание (два отдельных PR)
 
-В main settings изменение decoy требует его старого секрета, хотя command пришёл
-из основной сессии. Забыт decoy — отказ без reset. Из decoy UI команды смены
-паролей и ручного backup скрыты согласно концепции; compact в разделе корзины
-доступен и decoy, с обязательной проверенной копией без основного пароля.
-Core остаётся симметричным для тестирования независимости. До входа безопасные
-настройки и hint доступны, trash/zone settings — нет. Для compact показывать
-новый путь и retained source.
+**Вход:** P1…P4, model-tested owner/local-state. До P6 только synthetic/fault IO;
+production source/destinations требуют device profiles.
 
-## 5. Перед передачей и PR
+**P5a:** SnapshotCopier и main-authorized selective compact через общий coordinator,
+выбор/default both, expected decoy secret до файлов, один S/backup/candidate/full
+verify. Unselected raw/logical bytes без key, обе selected closure/AEAD. Direct decoy
+deny отдельно от symmetric helper. Source freshness/journal/AcceptSwitch vs Revoke,
+Unknown/restart без скрытого выбора. Source и новая verified backup retained.
 
-Работать в новой ветке от принятой архитектуры. Делить реализацию по P1…P6 на
-проверяемые коммиты, не менять SDK ради обхода несовместимой зависимости. Если
-нужна поправка формата, сначала обновить документы и fixtures с описанием
-совместимости, не создавать два разных «v1».
+**Выход P5a:** COPY/COMPACT/MAINT model P0, faults между зонами/на switch, честные
+S/C/2S+C/scratch sizes. Unknown selected refs — отказ до backup, без partial fallback.
 
-Для Kotlin/manifest/dependencies изменений: собрать debug, unit tests, lint и
-instrumented tests на доступном API31+; проверить release/R8 crypto path. Команды
-адаптировать к реальному runner, не записывать «успешно», если устройства нет.
-Прогонять релевантную часть матрицы и сохранять safe reports/KDF/provider metrics
-в `docs/architecture/validation/`, без секретов. Долгие device/security gates
-явно перечислять как открытые до release, не скрывать за успешными unit tests.
+**P5b:** ChangeSecret main/decoy через тот же автомат; current target/new twice/
+inequality, независимый новый ZDK/envelope, bottom-up всей reachable цели.
+IDs/props/dates/objectRevision прежние, target zoneSeq+1; другая raw/logical зона
+и ZDK прежние без её пароля. Оба headers только новые, старые target records/
+envelopes не попадают в candidate. Same S1 — UnchangedSecret; preferred UI отдельно.
 
-Проверить итоговый diff, коммитить/отправить отдельную ветку, создать PR без merge.
-PR описывает фактическое поведение и проверки; переносимость, две зоны и crash
-handling подтверждаются результатами матрицы, а не текстом этого плана.
+**Выход P5b:** REKEY-01…08 и applicable MAINT. Independent offline reader со старой
+копией/secret/ZDK не читает обновлённую цель и последующие данные, новым ключом
+полная логическая эквивалентность. Source/backup имеют прежнюю защиту. Никакого
+user rewrap-only. New password changed только после whole verify+durable switch.
+
+Migration в P5 только safe dispatcher и synthetic test-only известный переход,
+не выдуманный production1.0; не автоматическая часть compact/rekey.
+
+## 8. P6 — Android, lifecycle, затем UI (отдельные задания)
+
+**P6a, вход P3/P5:** SAF FD owner/grants/gate для source/backup/candidate roots,
+device faults/namespace/local metadata. Доказать ExistingWriteDurable,
+DurableCreateIdentity, DurableLocalState на конкретных authority/build/root/volume/
+backend/API. **Выход:** SAF/DUR P0 и измеренные профили; до этого production
+allowlist пуст. Seek/probe не подтверждают power-loss.
+
+**P6b, вход P6a:** foreground таблица design§6.1: multi-resume/top-resumed/visibility/
+focus, Home/screen-off/own dialogs/rotation/resize/picker. Настроить manifest/XML
+и проверить OEM device transfer до real data. Нет plaintext SavedState/logs/temps,
+закрыты IME/autofill/content capture/clipboard/recents leaks. **Выход:** LIFE/LEAK P0,
+blocking IO+late completion/revoke-switch на устройстве; cleanup после quiescence,
+без обещания2с уничтожения всех RAM copies.
+
+**P6c, отдельное последующее поручение:** только после P1…P6b подключать engine к
+рабочему UI. Async snapshot/ACK, dirty N+1 при ACK N, период7с, ошибки без ложного
+Saved. Title/date/unsaved indicator по концепции, не demo-замена editor. Main-only
+password/compact UI+coordinator tests, both default; service decoy не пользовательская
+session. Старые Unit-hook tests отражают memory-only поведение, обновить их.
+Успешное обслуживание закрывает старую сессию; новый вход в выбранный файл отдельно.
+
+**Выход P6c:** реальные integration tests без регрессий editor, честные Unknown/new
+path/sizes, никаких late picker/candidate auto-open. Real data после release gates.
+
+## 9. Передача каждого этапа
+
+Новая ветка/проверяемые commits/PR без merge. Для Kotlin/manifest/dependencies —
+debug build, unit tests/lint, instrumented API31+ на доступном устройстве и crypto
+release/R8. Не записывать успех отсутствующего runner. Safe reports выполненных
+ID/seeds/faults/KDF/provider metrics в `docs/architecture/validation/`, без секретов.
+Device/security gates перечислять отдельно. Итоговая матрица106 ID закрывается
+по всем применимым ветвям после P6; ранний partial subcase не полный pass ID. Не выпускать unstable1.1 files без
+experimental маркировки; wire изменения сначала новой версией+fixtures, не двумя
+несовместимыми реализациями под одним minor.

@@ -1,0 +1,224 @@
+{
+  "container_version": "1.1",
+  "secret_encoding_version": 1,
+  "unicode_version": "16.0.0",
+  "normalization": "NFC",
+  "uax15_revision": 56,
+  "raw_codepoints_max": 1024,
+  "raw_utf8_max": 4096,
+  "normalized_codepoints_max": 256,
+  "normalized_utf8_max": 1024,
+  "scope": "Synthetic public passwords only; normative bytes and rejections",
+  "fixtures": [
+    {
+      "id": "pin-leading-zero",
+      "method": "pin4",
+      "text": "0012",
+      "expected": {
+        "status": "ok",
+        "normalized": "0012",
+        "hex": "30303132"
+      }
+    },
+    {
+      "id": "pin6-leading-zero",
+      "method": "pin6",
+      "text": "000012",
+      "expected": {
+        "status": "ok",
+        "normalized": "000012",
+        "hex": "303030303132"
+      }
+    },
+    {
+      "id": "text-pin-equivalent",
+      "method": "text",
+      "text": "0012",
+      "expected": {
+        "status": "ok",
+        "normalized": "0012",
+        "hex": "30303132"
+      }
+    },
+    {
+      "id": "text-decomposed",
+      "method": "text",
+      "text": "é",
+      "expected": {
+        "status": "ok",
+        "normalized": "é",
+        "hex": "c3a9"
+      }
+    },
+    {
+      "id": "text-composed",
+      "method": "text",
+      "text": "é",
+      "expected": {
+        "status": "ok",
+        "normalized": "é",
+        "hex": "c3a9"
+      }
+    },
+    {
+      "id": "text-no-trim",
+      "method": "text",
+      "text": " A ",
+      "expected": {
+        "status": "ok",
+        "normalized": " A ",
+        "hex": "204120"
+      }
+    },
+    {
+      "id": "text-case-preserved",
+      "method": "text",
+      "text": "aA",
+      "expected": {
+        "status": "ok",
+        "normalized": "aA",
+        "hex": "6141"
+      }
+    },
+    {
+      "id": "unicode16-decomposition",
+      "method": "text",
+      "text": "𑎃",
+      "expected": {
+        "status": "ok",
+        "normalized": "𑎃",
+        "hex": "f0918e83"
+      }
+    },
+    {
+      "id": "unicode16-composed",
+      "method": "text",
+      "text": "𑎃",
+      "expected": {
+        "status": "ok",
+        "normalized": "𑎃",
+        "hex": "f0918e83"
+      }
+    },
+    {
+      "id": "private-use",
+      "method": "text",
+      "text": "",
+      "expected": {
+        "status": "ok",
+        "normalized": "",
+        "hex": "ee8080"
+      }
+    },
+    {
+      "id": "unassigned",
+      "method": "text",
+      "text": "͸",
+      "expected": {
+        "status": "InvalidSecret"
+      }
+    },
+    {
+      "id": "noncharacter",
+      "method": "text",
+      "text": "﷐",
+      "expected": {
+        "status": "InvalidSecret"
+      }
+    },
+    {
+      "id": "nul",
+      "method": "text",
+      "text": "a\u0000b",
+      "expected": {
+        "status": "InvalidSecret"
+      }
+    },
+    {
+      "id": "cr-lf",
+      "method": "text",
+      "text": "a\r\nb",
+      "expected": {
+        "status": "InvalidSecret"
+      }
+    },
+    {
+      "id": "empty",
+      "method": "text",
+      "text": "",
+      "expected": {
+        "status": "InvalidSecret"
+      }
+    },
+    {
+      "id": "pin-non-ascii",
+      "method": "pin4",
+      "text": "٠٠١٢",
+      "expected": {
+        "status": "InvalidSecret"
+      }
+    },
+    {
+      "id": "pattern-midpoint",
+      "method": "pattern",
+      "hits": [
+        1,
+        3,
+        6
+      ],
+      "expected": {
+        "status": "ok",
+        "normalized": "1236",
+        "hex": "31323336"
+      }
+    },
+    {
+      "id": "pattern-diagonal",
+      "method": "pattern",
+      "hits": [
+        1,
+        9,
+        8
+      ],
+      "expected": {
+        "status": "ok",
+        "normalized": "1598",
+        "hex": "31353938"
+      }
+    },
+    {
+      "id": "pattern-text-equivalent",
+      "method": "pattern",
+      "hits": [
+        1,
+        2,
+        3,
+        4
+      ],
+      "expected": {
+        "status": "ok",
+        "normalized": "1234",
+        "hex": "31323334"
+      }
+    },
+    {
+      "id": "pattern-too-short",
+      "method": "pattern",
+      "hits": [
+        1,
+        3
+      ],
+      "expected": {
+        "status": "InvalidSecret"
+      }
+    },
+    {
+      "id": "malformed-utf16",
+      "method": "text",
+      "utf16le_hex": "00d8",
+      "expected": {
+        "status": "InvalidSecret"
+      }
+    }
+  ]
+}
