@@ -7,10 +7,11 @@
 Нормативная основа: согласованные design/format/test/prototype/resolution1.1,
 reconciliation-materials и текущий `editor/NoteDocument.kt`.
 
-**Статус: P1 частично выполнен; полная приёмка ожидает Android runtime gate.**
+**Статус: P1 частично выполнен; ожидаются runtime после R8 и вторая Android-конфигурация.**
 Независимые Unicode conformance и normative-byte проверки выполнены. Сборка Android
 и упаковка ресурсов проверяются отдельно от исполнения: Android runner здесь
-отсутствует. P1 не создаёт защищённый пользовательский контейнер.
+отсутствует. Пользователь подтвердил debug instrumentation на Honor/Android15;
+эта отдельная категория evidence описана ниже. P1 не создаёт защищённый пользовательский контейнер.
 
 ## Реализация
 
@@ -220,13 +221,14 @@ Android runner отсутствует: нет emulator executable или system 
 содержит platforms/build-tools/platform-tools. `adb devices -l` завершился до discovery:
 `adb_utils.cpp: Cannot mkdir '/home/agent/.android': Read-only file system`;
 ANDROID_USER_HOME/ANDROID_SDK_HOME этот adb binary не перенаправили. Поэтому список
-подключённых устройств не установлен, API31+ instrumentation **не выполнена**.
-`StorageDependencyTest` добавлен и test APK собран; это не заменяет запуск.
+подключённых устройств не установлен, API31+ instrumentation **не выполнена агентом**.
+`StorageDependencyTest` добавлен и test APK собран. Позже пользователь подтвердил
+его фактический debug-запуск; это не собственный запуск агента и не release runtime.
 
 Release/R8 build и наличие ICU data/notices в APK проверены. S1/CBOR runtime **после
 R8 на Android не выполнен**. Новый storage слой пока недостижим из UI; исходный optimization packageScope сохранён.
 Сборка и наличие resources сами по себе не доказывают выполнение backend calls после R8.
-Перед приёмкой P1 требуется API31+ execution, two-device S1 matrix и runtime smoke
+Перед приёмкой P1 требуются полный runtime suite API31+, two-device S1 matrix и runtime smoke
 release/R8 с реальными вызовами storage backend. Новые keep rules и ослабление R8
 для получения формального PASS не добавлялись.
 
@@ -234,3 +236,141 @@ P2 может использовать проверенные модели/bytes
 сохраняя указанный gate открытым. P1 полностью принятым и пользовательским хранилищем
 не объявлен. Argon2/encryption/key management, authentication, transactional writer,
 recovery/durability, SAF, lifecycle и UI integration не реализованы и не проверены.
+
+
+## Дополнение: подготовка release runtime и результат пользователя (19 октября 2026)
+
+Перед изменениями актуальная ветка PR6 подтверждена через GitHub API:
+`codex/copper-scroll-p1-codecs-parser-s1` = `7ec26766befbc6613a33ec48a5d9d9ed4e161de5`.
+PR open/Draft, без merge. Ниже отделены новые evidence от исходного JVM отчёта.
+
+| Категория evidence | Статус / источник |
+| --- | --- |
+| JVM + независимый Unicode16 conformance | PASS агента в исходном P1: ICU4J76.1 и unicodedata2, полный официальный corpus;35 unit tests |
+| Debug instrumentation на Honor | **PASS пользователя**: физический Honor ABR-LX1, Android15; по описанию скриншота `:app:connectedDebugAndroidTest`, `pinnedUnicodeAndCborOnAndroid`,1 passed / BUILD SUCCESSFUL |
+| Сборка release/R8 и release-derived instrumentation | Подготовка и проверки артефактов агента; результаты команд ниже, это не исполнение на устройстве |
+| Runtime после R8 на Honor | **ОЖИДАЕТСЯ** запуск готовой конфигурации пользователем |
+| Вторая Android-конфигурация API31+ | **НЕ ВЫПОЛНЕНА**; один Honor/debug run её не заменяет |
+
+Пользовательский debug run не обозначается release-проверкой или прогоном нового
+семитестового suite. Warnings `sun.misc.Unsafe` / `com.google.protobuf` не помешали
+его успеху; JDK и версии зависимостей ради них не менялись. Полный Unicode conformance
+повторять на телефоне не требуется.
+
+### Выбранная конфигурация и предел результата
+
+Отдельный build type `p1Release` делает `initWith(release)`; AGP9.4.1 выполняет
+`minifyP1ReleaseWithR8`. Исходные `optimization.enable=true` и packageScope
+`androidx.**`, `kotlin.**`, `kotlinx.**` сохранены. **Storage `com.fantadrom...`,
+ICU `com.ibm.icu...` и CBOR `co.nstant.in...` не входят в область optimization.**
+Runtime PASS подтвердит их работу из APK после существующей обработки, но не
+прохождение их собственного кода через optimization. Область не расширялась,
+новые keep/dontwarn rules не добавлялись, R8 не отключался (включая test APK).
+
+Production sources, SDK/minSdk/Gradle/AGP/Kotlin, common dependencies и release
+поведение не менялись. Отличия installable test target от настоящего release:
+application ID suffix `.p1runtime`; локальная Android debug/test signingConfig;
+matchingFallbacks=`release`; небольшой asset marker `p1-runtime-target.txt`.
+Штатная release-подпись не изменена. Ключ создаётся/хранится обычными Android tools
+локально, не коммитится. `debugImplementation` в target не подмешивается.
+Нового diagnostic UI или скрытого пользовательского входа нет.
+
+Первый instrumentation R8 build выявил реальную ошибку, отличную от предупреждений
+пользователя: `IncompatibleModifiers` из `error_prone_annotations` ссылается на
+`javax.lang.model.element.Modifier`, отсутствующий в Android. Проверен bytecode:
+annotation имеет retention CLASS, target ANNOTATION_TYPE и compiler-only API.
+Артефакт исключён **только** из `p1ReleaseAndroidTestRuntimeClasspath`, остаётся
+на compile classpath. Production dependencies/версии и обычный debug classpath
+не изменены. Предложенный R8 `-dontwarn` не применялся.
+
+Флаг `-Pp1ReleaseRuntime=true` выбирает `testBuildType=p1Release` и класс
+`com.fantadrom.copperscroll.storage.runtime.P1BackendRuntimeTest`; без него
+default debug instrumentation остаётся обычной, P1 connected task отсутствует.
+Перед каждым тестом проверяются expected variant/package, non-debuggable target,
+marker из его assets и тождественность S1/codecs/ICU/CBOR classes из target loader.
+Тесты напрямую вызывают production API; нормализатор или CBOR не переписаны в suite.
+`textUsing(...,null)` вызывает существующий production UnsupportedSecretEncoding path,
+не меняя реальный pinned backend, и проверяет отсутствие system NFC fallback.
+
+Suite: загрузка UCD16/NFC resources; Unicode16 composition и composed/decomposed equality;
+PIN4/PIN6 leading zeros; repertoire reject; отсутствие fallback; unknown settings enums;
+независимый golden; неканонический CBOR reject; все21 исходных S1 vectors с отказами,
+включая malformed UTF16. Всего7 tests, без полного NormalizationTest на телефоне.
+Только synthetic values, assert diagnostics не печатают secrets/notes.
+
+### Подготовка артефактов и запуск
+
+`verifyP1ReleaseApks` автоматически предшествует connected task. Java audit читает
+class_defs DEX target/test, подтверждает backend в target и запрещает вторую копию
+storage/ICU/CBOR в test APK. Проверяет3950 ICU files, SHA256 `nfc.nrm`/`uprops.icu`
+из закреплённого ICU4J76.1, license/NOTICE assets, точность Android fixtures относительно
+frozen independent JVM fixtures. Test APK содержит только fixtures и suite, не копию
+production backend. Audit выводит `runtime=NOT_RUN` и никогда не выдаёт runtime PASS.
+
+Готовая Windows/Honor инструкция: [android-runtime-windows.md](../../../tools/p1/android-runtime-windows.md).
+Android Studio Run configuration: **P1 Release Runtime**. Эквивалентная одна команда:
+
+```powershell
+.\gradlew.bat -Pp1ReleaseRuntime=true :app:connectedP1ReleaseAndroidTest --console=plain
+```
+
+APK target: `app/build/outputs/apk/p1Release/app-p1Release.apk`, package
+`com.fantadrom.copperscroll.p1runtime`. Test APK:
+`app/build/outputs/apk/androidTest/p1Release/app-p1Release-androidTest.apk`, package
+`com.fantadrom.copperscroll.p1runtime.test`, instrumentation target — предыдущий package.
+Оба устанавливаются Gradle автоматически, отдельная ручная установка не нужна.
+
+APK audit: `app/build/reports/p1-runtime/apk-audit.txt`;
+runtime HTML: `app/build/reports/androidTests/connected/p1Release/index.html`;
+XML/logs: `app/build/outputs/androidTest-results/connected/p1Release/`.
+Для полного runtime результата требуются connected task,7 passed,0 failed/skipped и
+BUILD SUCCESSFUL. На второй Android-конфигурации запускается та же команда.
+
+Здесь подходящий Android runner отсутствует: emulator/system image не установлены,
+Honor пользователя находится вне среды агента. Фактическое выполнение остаётся
+пользователю. P1 не объявляется полностью принятым, PR6 остаётся Draft до результатов.
+
+### Выполненные агентом проверки этого дополнения
+
+Использованы те же JDK25.0.4.1, SDK37, ANDROID_USER_HOME и Gradle cache, что в P1;
+новых production dependencies/версий нет. Реально выполнены:
+
+```bash
+bash ./gradlew :app:assembleDebug :app:testDebugUnitTest :app:lint :app:assembleRelease :app:assembleDebugAndroidTest --offline --console=plain
+bash ./gradlew -Pp1ReleaseRuntime=true :app:verifyP1ReleaseApks :app:lintP1Release --offline --console=plain
+bash ./gradlew -Pp1ReleaseRuntime=true :app:connectedP1ReleaseAndroidTest --dry-run --console=plain
+JAVA_HOME=/workspace/tooling/jdk-25.0.4.1 python3 tools/p1/check-apk-audit.py
+```
+
+| Проверка | Фактический результат |
+| --- | --- |
+| Обычные debug/release,35 unit tests,lint,debug test APK | BUILD SUCCESSFUL,22s;35 passed,0 failures/errors/skips |
+| P1 target/test R8,APK audit,lintP1Release | BUILD SUCCESSFUL; после добавления config invariant guard21s,81 tasks; оба `minifyP1ReleaseWithR8` / `minifyP1ReleaseAndroidTestWithR8` выполнены или UP-TO-DATE |
+| Lint debug и p1Release | В каждом0 errors,15 прежних warnings и1 hint; новых runtime test warnings нет |
+| DEX class_defs / ICU / golden audit | artifactAudit=PASS; backend definitions в target, отсутствуют в test APK;3950 data files, pinned NFC/repertoire hashes и independent fixtures PASS |
+| `aapt2 dump xmltree ... --file AndroidManifest.xml` | В обработанных APK target/test packages корректны; instrumentation target=`com.fantadrom.copperscroll.p1runtime`; debuggable target не включён |
+| `apksigner verify --print-certs` | Обе подписи валидны, V2 certificate SHA256 target/test совпадают; private key не копировался/не коммитился |
+| `dexdump -d` test APK | Есть реальные invoke к production `SecretEncoding.text/pin4/pin6/pattern/textUsing/verifyDataVersion` и `SettingsCodec.encode/decode` |
+| R8 configuration comparison | После нормализации только путей variant `release`/`p1Release` configuration.txt совпадают; config guard дополнительно требует одинаковые enable/packageScope и non-debuggable target |
+| Release vs p1Release APK | Все3953 production ICU/license entries побайтно совпали; DEX bytes не идентичны, это отдельный release-derived target, а не утверждение о побайтном тождестве штатного release APK |
+| Connected task `--dry-run` | BUILD SUCCESSFUL,4s; граф включает оба R8 tasks, verifyP1ReleaseApks перед connected task; все tasks SKIPPED по смыслу dry-run, runtime не выполнялся |
+| P1 connected task без opt-in | Ожидаемый отказ task not found, проверен отдельно; debug fallback отсутствует |
+| Негативные проверки APK audit | Debug substitution, внедрение production DEX в test APK и изменённый nfc.nrm отклонены; исходные подписанные APK остались прежними |
+
+Первый offline dry-run connected task не нашёл закэшированные UTP runner dependencies
+(`gradle-work-action:32.4.1`); повторный разрешённый сетевой dry-run успешно загрузил
+необходимое и проверил граф. Это подготовка runner, не Android execution.
+Windows-команда намеренно без `--offline`, ручных изменений Gradle не требует.
+
+SHA256 APK именно этой сборки (локальная тестовая подпись; у пользователя hashes
+могут отличаться, pinned resource hashes проверяются отдельно автоматически):
+
+```text
+target: 7d68730e40087bf951a05be199dd48cce70c9c618d8d7da34bc4f07730d98661
+test:   7c0f4809c40474f8363d4bb69c2875e39fbe497ddb17d1ccc998be720404c12f
+```
+
+Открытые условия не сняты: **runtime7 tests на Honor после R8**, затем тот же suite
+на **второй Android-конфигурации API31+**. User debug PASS не распространяется на них.
+Ожидаемые имена тестов, какие APK устанавливаются, отчёты и состав сообщения при
+ошибке указаны в Windows-инструкции. PR остаётся Draft, P1 — частично выполненным.
