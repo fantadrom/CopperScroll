@@ -23,14 +23,26 @@ import com.google.testing.platform.proto.api.core.TestSuiteResultProto.TestSuite
 
 /** Host-only gate. Uses the existing AGP runner's result schema; no Android/production code. */
 public final class VerifyRuntimeResults {
-    static final String SUITE = "com.fantadrom.copperscroll.storage.runtime.P1BackendRuntimeTest";
-    static final Set<String> EXPECTED = Set.of(
+    static String SUITE = "com.fantadrom.copperscroll.storage.runtime.P1BackendRuntimeTest";
+    static Set<String> EXPECTED = Set.of(
         "targetApkLoadsPinnedUnicode16Data", "unicode16CompositionAndEquivalentSecrets",
         "pinLeadingZerosAndRejectedRepertoire", "unsupportedBackendDoesNotFallBackToSystemNfc",
         "cborUnknownEnumsAndIndependentGolden", "rejectsNoncanonicalGolden", "all21SyntheticS1GoldenVectors");
+    static String reportDirectory = "p1-runtime";
+    static void configure(String profile) {
+        require(profile.equals("p2") || profile.equals("p2-benchmark"), "Unknown runtime profile");
+        reportDirectory = profile.equals("p2") ? "p2-runtime" : "p2-benchmark";
+        SUITE = "com.fantadrom.copperscroll.storage.runtime." +
+            (profile.equals("p2") ? "P2CryptoRuntimeTest" : "P2KdfBenchmark");
+        EXPECTED = profile.equals("p2") ? Set.of("primitiveKnownAnswers", "independentFormatFixture",
+            "independentEnvelopesAndExpectedZone", "ambiguousCredentialAndUnchangedSecret",
+            "kdfLimitsAndCancellation", "recordTamperingAndNoPlaintext", "freshRandomnessAndRngFailure",
+            "prepareNewKeyAndCleanup") : Set.of("measureSelectedProfile");
+    }
 
     public static void main(String[] args) throws Exception {
-        require(args.length == 3, "Expected prepare|verify, app build directory, SDK adb executable");
+        require(args.length == 3 || args.length == 4, "Expected prepare|verify, app build directory, SDK adb executable, optional P2 profile");
+        if (args.length == 4) configure(args[3]);
         Path build = Path.of(args[1]);
         if (args[0].equals("prepare")) prepare(build, args[2]);
         else if (args[0].equals("verify")) {
@@ -43,8 +55,8 @@ public final class VerifyRuntimeResults {
     }
 
     static Path results(Path build) { return build.resolve("outputs/androidTest-results/connected/p1Release"); }
-    static Path manifest(Path build) { return build.resolve("reports/p1-runtime/run.properties"); }
-    static Path summary(Path build) { return build.resolve("reports/p1-runtime/runtime-result.txt"); }
+    static Path manifest(Path build) { return build.resolve("reports/" + reportDirectory + "/run.properties"); }
+    static Path summary(Path build) { return build.resolve("reports/" + reportDirectory + "/runtime-result.txt"); }
 
     static void prepare(Path build, String adb) throws Exception {
         // This task is unconditionally executed BEFORE connected, never a cached input/output check.
@@ -52,7 +64,7 @@ public final class VerifyRuntimeResults {
         Map<String, String> devices = snapshot(adb, System.getenv("ANDROID_SERIAL"));
         saveManifest(manifest(build), devices);
         bindArtifacts(build);
-        System.out.println("P1 fresh run prepared: " + devices.size() + " device(s); previous runtime results removed");
+        System.out.println(reportDirectory + " fresh run prepared: " + devices.size() + " device(s); previous runtime results removed");
     }
 
     private static final List<String> ARTIFACT_FIELDS = List.of("artifactBundleId", "targetSha256", "testSha256",
@@ -63,7 +75,7 @@ public final class VerifyRuntimeResults {
         return properties;
     }
     static void bindArtifacts(Path build) throws Exception {
-        Properties artifacts = readProperties(build.resolve("reports/p1-runtime/artifact-manifest.properties"));
+        Properties artifacts = readProperties(build.resolve("reports/" + reportDirectory + "/artifact-manifest.properties"));
         require(artifacts.getProperty("mappingMarkers", "").equals("PASS"), "Missing matching APK/mapping diagnostic snapshot");
         Properties run = readProperties(manifest(build));
         for (String field : ARTIFACT_FIELDS) {
@@ -73,7 +85,7 @@ public final class VerifyRuntimeResults {
         try (OutputStream out = Files.newOutputStream(manifest(build))) { run.store(out, "Fresh run bound to both processed APKs and mappings"); }
     }
     static void verifyArtifactBinding(Path build) throws Exception {
-        Properties artifacts = readProperties(build.resolve("reports/p1-runtime/artifact-manifest.properties"));
+        Properties artifacts = readProperties(build.resolve("reports/" + reportDirectory + "/artifact-manifest.properties"));
         Properties run = readProperties(manifest(build));
         require(artifacts.getProperty("mappingMarkers", "").equals("PASS"), "APK/mapping diagnostic mismatch");
         for (String field : ARTIFACT_FIELDS) require(!run.getProperty(field, "").isBlank() &&
@@ -203,14 +215,15 @@ public final class VerifyRuntimeResults {
             }
         }
         verifyRunnerProof(directory, manifest, count);
-        StringBuilder summary = new StringBuilder("runtime=PASS\nvariant=p1Release\nrunId=")
+        StringBuilder summary = new StringBuilder("runtime=PASS\nvariant=p1Release\nsuite=" + SUITE + "\nrunId=")
             .append(run.getProperty("runId")).append("\n");
         for (String field : ARTIFACT_FIELDS) if (run.containsKey(field))
             summary.append(field).append('=').append(run.getProperty(field)).append('\n');
         for (var device : found.entrySet()) {
             require(device.getValue().equals(EXPECTED), "Incomplete runtime suite on " + device.getKey() +
-                ": expected 7, found " + device.getValue().size());
-            summary.append("device=").append(device.getKey()).append(" tests=7 failures=0 errors=0 skipped=0\n");
+                ": expected " + EXPECTED.size() + ", found " + device.getValue().size());
+            summary.append("device=").append(device.getKey()).append(" tests=").append(EXPECTED.size())
+                .append(" failures=0 errors=0 skipped=0\n");
         }
         return summary.toString();
     }

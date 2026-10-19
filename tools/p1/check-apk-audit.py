@@ -16,7 +16,7 @@ TEST = ROOT / 'app/build/outputs/apk/androidTest/p1Release/app-p1Release-android
 DEBUG = ROOT / 'app/build/outputs/apk/debug/app-debug.apk'
 CLASSES = ROOT / 'app/build/p1-apk-verifier/classes'
 GOLDEN = ROOT / 'app/src/test/resources/p1/settings-default.hex'
-ARGUMENTS = ROOT / 'app/build/reports/p1-runtime/audit-arguments.txt'
+ARGUMENTS = Path(os.environ.get('P1_AUDIT_ARGUMENTS', str(ROOT / 'app/build/reports/p1-runtime/audit-arguments.txt')))
 JAVA = str(Path(os.environ['JAVA_HOME']) / 'bin/java') if os.environ.get('JAVA_HOME') else 'java'
 
 def digest(path):
