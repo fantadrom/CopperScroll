@@ -6,7 +6,7 @@
       <option name="scriptParameters" value="-Pp1ReleaseRuntime=true --console=plain" />
       <option name="taskNames">
         <list>
-          <option value=":app:connectedP1ReleaseAndroidTest" />
+          <option value=":app:p1ReleaseRuntimeCheck" />
         </list>
       </option>
     </ExternalSystemSettings>

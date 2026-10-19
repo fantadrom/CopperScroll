@@ -7,6 +7,9 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.util.HashSet;
+import java.util.HashMap;
+import java.util.ArrayList;
+import java.util.Map;
 import java.util.List;
 import java.util.Set;
 import java.util.zip.ZipEntry;
@@ -25,10 +28,16 @@ public final class VerifyRuntimeApks {
         "Lco/nstant/in/cbor/CborDecoder;", "Lco/nstant/in/cbor/CborEncoder;");
 
     public static void main(String[] args) throws Exception {
+        if (args.length == 2 && args[0].equals("--hierarchy")) {
+            try (ZipFile apk = new ZipFile(args[1])) { checkHierarchy(definitions(apk)); }
+            System.out.println("classHierarchyPackageAccess=PASS; runtime=NOT_RUN"); return;
+        }
         require(args.length == 4, "Expected target APK, test APK, frozen golden and report");
         Path target = Path.of(args[0]), test = Path.of(args[1]), golden = Path.of(args[2]), report = Path.of(args[3]);
         try (ZipFile app = new ZipFile(target.toFile()); ZipFile tests = new ZipFile(test.toFile())) {
-            Set<String> appClasses = definitions(app), testClasses = definitions(tests);
+            Map<String, Definition> appDefinitions = definitions(app), testDefinitions = definitions(tests);
+            checkHierarchy(appDefinitions); checkHierarchy(testDefinitions);
+            Set<String> appClasses = appDefinitions.keySet(), testClasses = testDefinitions.keySet();
             require(appClasses.containsAll(BACKEND), "Processed target is missing backend definitions");
             require(!appClasses.contains(TEST) && testClasses.contains(TEST), "Test class belongs in instrumentation APK only");
             for (String name : testClasses) {
@@ -37,6 +46,8 @@ public final class VerifyRuntimeApks {
                     !name.startsWith("Lcom/ibm/icu/") && !name.startsWith("Lco/nstant/in/cbor/"),
                     "Instrumentation APK contains a second backend implementation");
             }
+            Set<String> shared = new HashSet<>(appClasses); shared.retainAll(testClasses);
+            require(shared.isEmpty(), "Duplicate target/test runtime class definitions: " + shared);
             long resources = app.stream().filter(e -> e.getName().startsWith(ICU) && !e.isDirectory()).count();
             require(resources == 3950, "Unexpected pinned ICU resource set");
             require(tests.stream().noneMatch(e -> e.getName().startsWith(ICU)), "ICU data duplicated in test APK");
@@ -58,6 +69,7 @@ public final class VerifyRuntimeApks {
                 "targetSha256=" + hash(Files.newInputStream(target)) + "\n" +
                 "testSha256=" + hash(Files.newInputStream(test)) + "\n" +
                 "targetBackendDefinitions=present\ntestBackendDefinitions=absent\n" +
+                "classHierarchyPackageAccess=PASS\nduplicateTargetTestDefinitions=0\n" +
                 "icuResourceFiles=" + resources + "\npinnedNfcAndRepertoireHashes=PASS\nindependentFixtures=PASS\n";
             Files.createDirectories(report.getParent()); Files.writeString(report, summary);
             System.out.print(summary);
@@ -84,8 +96,8 @@ public final class VerifyRuntimeApks {
             byte[] bytes = in.readNBytes(max + 1); require(bytes.length <= max, "APK entry oversized"); return bytes;
         }
     }
-    private static Set<String> definitions(ZipFile file) throws IOException {
-        Set<String> classes = new HashSet<>(); int dexCount = 0;
+    private static Map<String, Definition> definitions(ZipFile file) throws IOException {
+        Map<String, Definition> classes = new HashMap<>(); int dexCount = 0;
         var entries = file.entries();
         while (entries.hasMoreElements()) {
             ZipEntry entry = entries.nextElement();
@@ -93,9 +105,36 @@ public final class VerifyRuntimeApks {
             require(++dexCount <= 256, "Too many DEX files");
             Dex dex = new Dex(read(file, entry.getName(), 64 * 1024 * 1024));
             int count = dex.u32(96), offset = dex.u32(100); dex.range(offset, (long) count * 32);
-            for (int i = 0; i < count; i++) classes.add(dex.descriptor(dex.u32(offset + i * 32)));
+            for (int i = 0; i < count; i++) {
+                int row = offset + i * 32;
+                String name = dex.descriptor(dex.u32(row));
+                List<String> parents = new ArrayList<>();
+                int superclass = dex.b.getInt(row + 8);
+                if (superclass != -1) parents.add(dex.descriptor(superclass));
+                int interfaces = dex.u32(row + 12);
+                if (interfaces != 0) {
+                    int size = dex.u32(interfaces); dex.range(interfaces + 4, (long) size * 2);
+                    for (int j = 0; j < size; j++)
+                        parents.add(dex.descriptor(Short.toUnsignedInt(dex.b.getShort(interfaces + 4 + j * 2))));
+                }
+                require(classes.put(name, new Definition(dex.u32(row + 4), parents)) == null, "Duplicate DEX definition");
+            }
         }
         require(dexCount > 0, "APK contains no DEX"); return classes;
+    }
+    private static final class Definition {
+        final int flags; final List<String> parents;
+        Definition(int flags, List<String> parents) { this.flags = flags; this.parents = parents; }
+    }
+    private static String packageName(String descriptor) { return descriptor.substring(0, descriptor.lastIndexOf('/') + 1); }
+    private static void checkHierarchy(Map<String, Definition> classes) {
+        classes.forEach((name, definition) -> {
+            for (String parent : definition.parents) {
+                Definition base = classes.get(parent);
+                require(base == null || (base.flags & 1) != 0 || packageName(name).equals(packageName(parent)),
+                    "Inaccessible nonpublic superclass/interface: " + name + " -> " + parent);
+            }
+        });
     }
     private static void require(boolean condition, String message) {
         if (!condition) throw new IllegalStateException(message);

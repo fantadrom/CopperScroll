@@ -1,0 +1,5 @@
+# Partial R8 repackaged CollectionsKt__MutableCollectionsJVMKt outside kotlin.collections
+# while its superclass CollectionsKt__IterablesKt remained package-private there.
+# Retain this runtime package boundary in release AND its p1Release derivative.
+# This does not keep classes/members or disable shrinking, optimization or name obfuscation.
+-keeppackagenames kotlin.collections.**

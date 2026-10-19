@@ -15,7 +15,7 @@
    выполните одну эквивалентную команду в PowerShell:
 
    ```powershell
-   .\gradlew.bat -Pp1ReleaseRuntime=true :app:connectedP1ReleaseAndroidTest --console=plain
+   .\gradlew.bat -Pp1ReleaseRuntime=true :app:p1ReleaseRuntimeCheck --console=plain
    ```
 
 Флаг включает instrumentation именно для `p1Release`. Без него эта connected task
@@ -27,8 +27,16 @@
 
 Перед установкой автоматически выполняется `verifyP1ReleaseApks`. Она проверяет
 реальные определения классов DEX: backend есть в обработанном target APK, отсутствует
-в test APK; pinned ICU resources и независимые fixtures совпадают с эталонами.
+в test APK; общих определений классов нет, superclass/interface с package-private
+доступом не вынесен в чужой пакет; pinned ICU resources и независимые fixtures совпадают с эталонами.
 Сообщение `artifactAudit=PASS` означает только готовность артефактов.
+
+Затем `prepareP1RuntimeRun` удаляет прежние P1 XML/HTML/служебные результаты и итоговый
+runtime PASS, записывает новый run ID и список подключённых устройств через SDK adb.
+Offline/unauthorized, API ниже31 или отсутствие устройств завершают команду ошибкой.
+Если задан `ANDROID_SERIAL`, выбирается это одно устройство; иначе — все подключённые.
+Устройства с одинаковыми model/version запускайте последовательно. Не подключайте
+новое устройство до окончания команды. Connected task всегда выполняется заново.
 
 Устанавливаются два APK:
 
@@ -44,10 +52,18 @@ matchingFallbacks=`release` и служебным asset marker.
 Только из runtime classpath test APK исключены compiler annotations
 `com.google.errorprone:error_prone_annotations`: их CLASS-retention annotation
 ссылалась на отсутствующий Android JDK enum и вызывала реальный R8 build failure.
-Compile classpath, production dependencies, R8 scope и keep rules не изменены. Debug implementation dependencies
+Compile classpath, production dependencies и R8 scope не изменены. Debug implementation dependencies
 в нём отсутствуют. Отдельный application ID позволяет сохранить обычную установку
 Copper Scroll; тесты не требуют открытия приложения, пароля или заметок.
 Диагностический UI/скрытый пользовательский вход не добавлен.
+
+Исправление подтверждённого startup crash применяется и к настоящему release:
+`app/src/main/keepRules/kotlin-package-access.keep` содержит только
+`-keeppackagenames kotlin.collections.**`. Оно сохраняет пакет Kotlin collections,
+чтобы R8 не разместил подкласс вне пакета его package-private родителя. R8 продолжает
+shrinking/optimization/переименование классов и методов; область optimization прежняя.
+InitializationProvider и ProcessLifecycleInitializer остаются включёнными.
+Нормативный wrapper — Gradle9.6.0; менять его на9.8.0 для этой проверки не требуется.
 
 В `P1BackendRuntimeTest` должны завершиться все тесты:
 
@@ -65,24 +81,52 @@ Copper Scroll; тесты не требуют открытия приложен�
 не запускается: он уже прошёл на JVM двумя независимыми реализациями.
 
 Признаки успеха: `minifyP1ReleaseWithR8` в сборке (или UP-TO-DATE),
-`artifactAudit=PASS`, задача **`:app:connectedP1ReleaseAndroidTest`**, **7 tests passed**, все перечисленные
-тесты passed, 0 failed/skipped и **BUILD SUCCESSFUL**. Только этот runtime-результат
-закрывает проверку на Honor после R8. Успех assemble/verify без connected task — нет.
+`artifactAudit=PASS`, выполнение **`:app:connectedP1ReleaseAndroidTest`**, затем
+успешная **`:app:p1ReleaseRuntimeCheck`** и **BUILD SUCCESSFUL**. Итоговый gate печатает:
+
+```text
+runtime=PASS
+variant=p1Release
+runId=<новый ID>
+device=<serial> tests=7 failures=0 errors=0 skipped=0
+```
+
+Последняя строка должна быть для каждого выбранного устройства. Gate требует ровно
+семь перечисленных методов именно `P1BackendRuntimeTest` на каждом устройстве.
+Missing/zero/partial XML, любой failure/error/skipped, неизвестный тест, повторный
+отчёт и старый XML дают ошибку; вложенные `testsuites/testsuite` не суммируются повторно.
+Ошибка runner также прерывает итоговую команду. **Один BUILD SUCCESSFUL от прямой
+connected task, особенно с tests="0", не считается PASS.** Пользовательские прежние
+release-запуски Honor15/эмулятор17 с нулём тестов не закрывают runtime gate.
+Успех assemble/verify или host-тестов самого валидатора тоже не означает Android PASS.
+Дополнительно автоматически сверяются свежие машинные отчёты runner:
+`test-result.pb` и `test-result-exit-code.txt` в папке XML. Это обязательно, потому что
+текущий XML writer не отражает все ошибки runner/пропуски. Каждый завершённый тест
+должен иметь PASSED, suite — PASS без platform errors, exit code —0. Эти файлы также
+нужно сохранить при ошибке; ручного запуска instrumentation не требуется.
 
 Результаты:
 
 - HTML: `app/build/reports/androidTests/connected/p1Release/index.html`;
 - XML/логи: `app/build/outputs/androidTest-results/connected/p1Release/`;
 - APK audit с SHA256: `app/build/reports/p1-runtime/apk-audit.txt`;
+- проверенный итог: `app/build/reports/p1-runtime/runtime-result.txt` (создаётся только при PASS);
+- текущий run ID/ожидаемые устройства: `app/build/reports/p1-runtime/run.properties`;
 - архитектурный статус: `docs/architecture/validation/p1-report.md`.
 
 При ошибке пришлите название failed task/test, последние строки ошибки из Build/Terminal,
-модель/версию Android и папку HTML/XML отчёта (если создана), вместе с `apk-audit.txt`.
+модель/версию Android и папку HTML/XML отчёта (если создана), вместе с папкой
+`app/build/reports/p1-runtime/`. При Process crashed также пришлите журнал именно
+процесса `com.fantadrom.copperscroll.p1runtime`, `app/build/outputs/mapping/p1Release/mapping.txt`
+**этой сборки** и map ID из стека. Сохраните mapping до следующей сборки: mapping с
+другим ID не подходит для достоверного retrace. Не смешивайте системный uwb-service с приложением.
 Не нужны пароли, содержимое заметок или целый пользовательский контейнер.
 Warnings `sun.misc.Unsafe`/`com.google.protobuf` сами по себе не означают отказ: оценивать
 exit status и результаты тестов. Не менять JDK/зависимости только для скрытия warnings.
 
 После Honor повторите ту же команду на второй Android-конфигурации API31+
 (например, другое физическое устройство или эмулятор с другой версией ОС), оставив
-подключённой только её. Повтор на том же Honor не заменяет вторую конфигурацию.
+подключённой только её. **Перед повтором сохраните первую папку XML/логов, HTML и
+`reports/p1-runtime/` вне `app/build/`**: следующий запуск удаляет прежние результаты.
+Повтор на том же Honor не заменяет вторую конфигурацию.
 Пришлите результаты обоих прогонов; до них P1 и PR6 остаются в частичном/Draft статусе.

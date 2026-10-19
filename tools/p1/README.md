@@ -57,7 +57,7 @@ For the ready Windows/Honor procedure, see [android-runtime-windows.md](android-
 Shared Android Studio Gradle run configuration: **P1 Release Runtime**. Equivalent PowerShell:
 
 ```powershell
-.\gradlew.bat -Pp1ReleaseRuntime=true :app:connectedP1ReleaseAndroidTest --console=plain
+.\gradlew.bat -Pp1ReleaseRuntime=true :app:p1ReleaseRuntimeCheck --console=plain
 ```
 
 `p1Release` inherits release optimization/R8 unchanged; only the install identity,
@@ -67,8 +67,14 @@ Normal release signing is untouched. Current optimization scope is only `android
 in the APK after the existing R8 pipeline, not optimization of these excluded packages.
 One actual test-only build failure (`javax.lang.model.element.Modifier` from Error Prone
 annotations) is resolved by excluding that compiler-metadata artifact only from the
-P1 instrumentation runtime classpath. It remains on the compile classpath; no keep/dontwarn
-rules, dependency-version changes, or R8 disablement are used.
+P1 instrumentation runtime classpath. It remains on the compile classpath.
+The later confirmed startup crash required one shared release rule:
+`app/src/main/keepRules/kotlin-package-access.keep` uses
+`-keeppackagenames kotlin.collections.**`. Partial R8 had moved a subclass outside its
+package-private superclass's package, in both real release and p1Release. Only this
+package boundary is retained; class/member obfuscation, shrinking, optimization and
+packageScope remain enabled. No dontwarn, dependency upgrades, Startup removal or
+global R8 disablement is used. The repository wrapper remains Gradle9.6.0.
 
 The opt-in selects `testBuildType=p1Release` and only `P1BackendRuntimeTest` (7 tests,
 including all21 synthetic S1 vectors). Without it, default debug instrumentation remains
@@ -83,19 +89,53 @@ NFC/repertoire data hashes, all3950 ICU resources, licenses, and independently a
 fixtures (`settings-default.hex`,21-vector `s1.tsv`, fixed noncanonical CBOR).
 The test APK contains fixtures, not production backend sources/resources. Full Unicode
 conformance remains on JVM and is not packaged in instrumentation.
+The audit now also rejects nonpublic superclass/interface access across packages and
+any duplicated target/test class definitions. These are actual DEX definitions, not
+mere references. Production release can be checked with the same audit's
+`--hierarchy <APK>` mode.
+
+The shared run configuration invokes `p1ReleaseRuntimeCheck`, not a bare connected
+task. Its prerequisite `prepareP1RuntimeRun` removes previous P1 reports/results and
+PASS summary, snapshots selected SDK-adb devices (honors a single ANDROID_SERIAL),
+and writes a fresh run ID. Connected execution cannot be UP-TO-DATE. The final Java11
+host gate requires the exact seven methods, class identity and zero failures/errors/
+skips **on every expected device**. Missing/zero/incomplete/duplicate/stale reports,
+an unexpected class/device/test, or runner failure fail the command. It accepts
+testsuites and nested testsuite/testcase without adding parent counts twice; XML
+external entities are disabled. No Python installation is required for the Windows run.
+The current AGP test engine's XML writer ignores `testRunFailed` and hardcodes some
+summary counters. The gate therefore ALSO requires fresh `test-result.pb` (every
+completed test PASSED, exact names/count, passing suite, no platform/test error) and
+`test-result-exit-code.txt`=0. This catches a crash or skipped/unfinished test even
+when XML looks successful. `p1ResultProtocol` is host-only and reads the same
+test-result-proto1.0.1 / protobuf3.25.5 already used by AGP9.4.1; neither APK receives
+these host dependencies. Toolchain and Android dependency versions are unchanged.
+Equal model/version device names are rejected before running: test them sequentially.
+The prior Honor15/emulator17 release attempts with tests="0" were NOT runtime PASS.
 
 Agent preparation without an Android runner (bash; normal SDK/JDK environment):
 
 ```bash
-bash ./gradlew :app:assembleDebug :app:testDebugUnitTest :app:lint :app:assembleRelease :app:assembleDebugAndroidTest
+bash ./gradlew :app:testP1RuntimeResults :app:assembleDebug :app:testDebugUnitTest :app:lint :app:assembleRelease :app:assembleDebugAndroidTest
 bash ./gradlew -Pp1ReleaseRuntime=true :app:verifyP1ReleaseApks :app:lintP1Release
-bash ./gradlew -Pp1ReleaseRuntime=true :app:connectedP1ReleaseAndroidTest --dry-run
+bash ./gradlew -Pp1ReleaseRuntime=true :app:p1ReleaseRuntimeCheck --dry-run
 python3 tools/p1/check-apk-audit.py
 ```
 
 Preparation audit: `app/build/reports/p1-runtime/apk-audit.txt` (`runtime=NOT_RUN`).
 Actual runtime HTML: `app/build/reports/androidTests/connected/p1Release/index.html`.
 XML/logs: `app/build/outputs/androidTest-results/connected/p1Release/`.
+Fresh checked runtime summary: `app/build/reports/p1-runtime/runtime-result.txt`;
+run/device manifest: `app/build/reports/p1-runtime/run.properties`.
+Expect `runtime=PASS`, `variant=p1Release`, fresh run ID and
+`device=<serial> tests=7 failures=0 errors=0 skipped=0` for each device, then BUILD SUCCESSFUL.
+`testP1RuntimeResults` (also part of `check`) tests the gate itself with host XML fixtures:
+full PASS, nested/two-device PASS, zero/partial/missing, failure/error/skipped, summary
+disagreement, unexpected methods/classes/devices, stale/duplicate reports, non-run
+status, missing manifest, XML external entities and removal of old results/summary.
+It also tests clean XML contradicted by runner crash/skipped/unfinished status,
+missing/partial/stale/corrupt machine results, platform errors and failed suite:
+30 host checks in total. The final gate requires both XML and machine results.
 An assembled APK, audit PASS or dry-run is not a runtime PASS. Honor release-runtime and
 another Android configuration API31+ remain open until actual results arrive. The same
 ready command runs the21 S1 vectors on each configuration. Current acceptance/evidence

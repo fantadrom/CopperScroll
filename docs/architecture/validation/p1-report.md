@@ -7,7 +7,8 @@
 Нормативная основа: согласованные design/format/test/prototype/resolution1.1,
 reconciliation-materials и текущий `editor/NoteDocument.kt`.
 
-**Статус: P1 частично выполнен; ожидаются runtime после R8 и вторая Android-конфигурация.**
+**Статус: P1 частично выполнен; release runtime упал до тестов, подготовлено исправление;
+ожидаются подтверждённые семь тестов после R8 на Honor и второй Android-конфигурации.**
 Независимые Unicode conformance и normative-byte проверки выполнены. Сборка Android
 и упаковка ресурсов проверяются отдельно от исполнения: Android runner здесь
 отсутствует. Пользователь подтвердил debug instrumentation на Honor/Android15;
@@ -18,7 +19,9 @@ reconciliation-materials и текущий `editor/NoteDocument.kt`.
 Core находится в `app/src/main/java/com/fantadrom/copperscroll/storage/format`,
 S1 — в `storage/access`; Android/Compose/View/URI/ContentResolver зависимостей нет.
 Работающий UI и модель редактора не подключены к новому слою. Сохранены SDK37,
-minSdk31, Gradle9.6.0, AGP9.4.1, Kotlin2.2.10 и исходные настройки release optimization.
+minSdk31, Gradle9.6.0, AGP9.4.1, Kotlin2.2.10 и исходная область release optimization.
+После подтверждённого startup crash добавлено узкое правило сохранения пакета
+Kotlin collections; диагностика и влияние на настоящий release приведены в конце отчёта.
 В version catalog добавлены только две точно закреплённые зависимости.
 
 - Codecs superblock1.1, descriptor18 и отдельно его точных logicalBytes0…15;
@@ -230,7 +233,8 @@ R8 на Android не выполнен**. Новый storage слой пока н
 Сборка и наличие resources сами по себе не доказывают выполнение backend calls после R8.
 Перед приёмкой P1 требуются полный runtime suite API31+, two-device S1 matrix и runtime smoke
 release/R8 с реальными вызовами storage backend. Новые keep rules и ослабление R8
-для получения формального PASS не добавлялись.
+для получения формального PASS на исходном этапе не добавлялись. Последующее
+обоснованное исправление package access после реального crash описано ниже.
 
 P2 может использовать проверенные модели/bytes и S1 для отдельной crypto разработки,
 сохраняя указанный gate открытым. P1 полностью принятым и пользовательским хранилищем
@@ -249,8 +253,8 @@ PR open/Draft, без merge. Ниже отделены новые evidence от 
 | JVM + независимый Unicode16 conformance | PASS агента в исходном P1: ICU4J76.1 и unicodedata2, полный официальный corpus;35 unit tests |
 | Debug instrumentation на Honor | **PASS пользователя**: физический Honor ABR-LX1, Android15; по описанию скриншота `:app:connectedDebugAndroidTest`, `pinnedUnicodeAndCborOnAndroid`,1 passed / BUILD SUCCESSFUL |
 | Сборка release/R8 и release-derived instrumentation | Подготовка и проверки артефактов агента; результаты команд ниже, это не исполнение на устройстве |
-| Runtime после R8 на Honor | **ОЖИДАЕТСЯ** запуск готовой конфигурации пользователем |
-| Вторая Android-конфигурация API31+ | **НЕ ВЫПОЛНЕНА**; один Honor/debug run её не заменяет |
+| Runtime после R8 на Honor | **НЕ PASS**: позднейший пользовательский запуск дал XML tests="0"; требуется повтор после исправления |
+| Вторая Android-конфигурация API31+ | **НЕ PASS**: эмулятор Android17 также дал tests="0"; успешная семитестовая матрица не выполнена |
 
 Пользовательский debug run не обозначается release-проверкой или прогоном нового
 семитестового suite. Warnings `sun.misc.Unsafe` / `com.google.protobuf` не помешали
@@ -265,7 +269,9 @@ PR open/Draft, без merge. Ниже отделены новые evidence от 
 ICU `com.ibm.icu...` и CBOR `co.nstant.in...` не входят в область optimization.**
 Runtime PASS подтвердит их работу из APK после существующей обработки, но не
 прохождение их собственного кода через optimization. Область не расширялась,
-новые keep/dontwarn rules не добавлялись, R8 не отключался (включая test APK).
+на шаге подготовки keep/dontwarn rules не добавлялись, R8 не отключался (включая test APK).
+Текущая версия добавляет только обоснованное `keeppackagenames` после выявленного crash;
+область optimization остаётся прежней.
 
 Production sources, SDK/minSdk/Gradle/AGP/Kotlin, common dependencies и release
 поведение не менялись. Отличия installable test target от настоящего release:
@@ -311,7 +317,7 @@ production backend. Audit выводит `runtime=NOT_RUN` и никогда н�
 Android Studio Run configuration: **P1 Release Runtime**. Эквивалентная одна команда:
 
 ```powershell
-.\gradlew.bat -Pp1ReleaseRuntime=true :app:connectedP1ReleaseAndroidTest --console=plain
+.\gradlew.bat -Pp1ReleaseRuntime=true :app:p1ReleaseRuntimeCheck --console=plain
 ```
 
 APK target: `app/build/outputs/apk/p1Release/app-p1Release.apk`, package
@@ -323,8 +329,10 @@ APK target: `app/build/outputs/apk/p1Release/app-p1Release.apk`, package
 APK audit: `app/build/reports/p1-runtime/apk-audit.txt`;
 runtime HTML: `app/build/reports/androidTests/connected/p1Release/index.html`;
 XML/logs: `app/build/outputs/androidTest-results/connected/p1Release/`.
-Для полного runtime результата требуются connected task,7 passed,0 failed/skipped и
-BUILD SUCCESSFUL. На второй Android-конфигурации запускается та же команда.
+Для полного runtime результата теперь требуется итоговый `p1ReleaseRuntimeCheck`,
+свежий `runtime=PASS`, ровно7 passed на каждом устройстве,0 failures/errors/skipped
+и BUILD SUCCESSFUL. Один успех connected task с tests="0" недостаточен.
+На второй Android-конфигурации запускается та же команда.
 
 Здесь подходящий Android runner отсутствует: emulator/system image не установлены,
 Honor пользователя находится вне среды агента. Фактическое выполнение остаётся
@@ -374,3 +382,222 @@ test:   7c0f4809c40474f8363d4bb69c2875e39fbe497ddb17d1ccc998be720404c12f
 на **второй Android-конфигурации API31+**. User debug PASS не распространяется на них.
 Ожидаемые имена тестов, какие APK устанавливаются, отчёты и состав сообщения при
 ошибке указаны в Windows-инструкции. PR остаётся Draft, P1 — частично выполненным.
+
+## Исправление P1 Release Runtime crash и защита от нулевого результата
+
+Перед этой работой локальная и удалённая ветки PR6 совпали:
+`8c40277e4b38fc5487b7ea45e671b1f59fe782c6`; рабочее дерево было чистым.
+PR6 open/Draft, без merge. Заголовок выше и инструкция запуска обновлены по новым
+данным; прежние таблицы сборок остаются историческими, а не доказательством runtime.
+
+### Установленная причина
+
+Пользователь сообщил два release-запуска: Honor Android15 и эмулятор Android17,
+оба с XML `tests="0"` несмотря на BUILD SUCCESSFUL connected task. Прямой
+instrumentation сообщил Process crashed. **Оба результата не являются PASS.**
+Подтверждённый ранее пользовательский debug run Honor (`StorageDependencyTest`,
+один тест) сохраняется отдельным PASS и не распространяется на release suite.
+
+Из приложенного `p1-crash.txt` выделен только AndroidRuntime процесса
+`com.fantadrom.copperscroll.p1runtime`; системный `uwb-service` относится к другому
+процессу и не использован для диагностики приложения. До пересборки сохранены
+локальные target/test/release APK и target/test mapping. Заголовок target mapping
+**точно совпал** с map ID пользовательского стека:
+
+```text
+6ef4545cbf2624cbf7f9bf58499d96cdcae12dcf8d0385638364d05128fb76e9
+```
+
+Retrace выполнен R8 из исходного AGP9.4.1 builder JAR, compiler9.4.24, с этим
+mapping. Mapping новой/чужой сборки для расшифровки не применялся. Расшифрованная
+цепочка: `InitializationProvider.onCreate:45` → `AppInitializer.doInitialize:168`
+→ `ProcessLifecycleInitializer.dependencies:39`; StartupException оборачивает
+IllegalAccessError при загрузке superclass. Соответствия точного mapping и
+**реальные DEX class_defs**, включая access_flags и superclass_idx:
+
+| Исходный класс | Обработанный descriptor | Access flags | Superclass |
+| --- | --- | --- | --- |
+| kotlin.collections.CollectionsKt__IterablesKt | Lkotlin/collections/j; | 0x0000: package-private | Lkotlin/collections/i; |
+| kotlin.collections.CollectionsKt__MutableCollectionsJVMKt | Lbh; | 0x0401: public abstract | Lkotlin/collections/j; |
+
+`bh` оказался в default package и наследует недоступный package-private класс
+из `kotlin.collections`. Эта недопустимая связь найдена **внутри target APK**;
+она не требует конфликта двух ClassLoader для возникновения IllegalAccessError.
+Старый target и обычный production release содержат по4544 определения и ровно
+одну такую межпакетную связь; старый test APK содержит1722 определения, не определяет
+ни `bh`, ни `kotlin.collections.j`, недопустимых связей в нём нет. Пересечение
+определений target/test пусто, включая Kotlin и AndroidX. Старый audit проверял
+backend/resources, но не superclass access, поэтому пропустил дефект.
+
+При текущей частичной optimization scope R8 переупаковал подкласс, оставив родителя
+package-private в исходном пакете. Проверены конфигурация, mapping и class_defs;
+`-allowaccessmodification` уже присутствовал, его повторное добавление не было бы
+исправлением. Дефект найден и в production release, поэтому test-only обход
+не устранил бы проблему обычной сборки. Это установленный дефект выходной иерархии
+при данной конфигурации, без утверждения о единственной внутренней причине в R8.
+Совпадение resolved runtime версий и отсутствие общих DEX definitions проверены
+отдельно; вторую копию backend в instrumentation не добавляли.
+
+Пользовательское локальное отличие Gradle9.8.0 учтено. Недопустимая иерархия уже
+была в сохранённых APK агента, собранных нормативным wrapper9.6.0. Следовательно,
+9.8.0 не требуется для её появления; причинной связи с обновлением wrapper нет.
+Gradle/AGP/Kotlin/зависимости и JDK ради предупреждений не менялись.
+
+### Минимальное исправление и границы
+
+В штатный AGP source folder `app/src/main/keepRules/` добавлен один файл
+`kotlin-package-access.keep`, одна директива:
+
+```proguard
+-keeppackagenames kotlin.collections.**
+```
+
+Сохраняется пакет взаимозависимых Kotlin collections classes. Их имена и members
+по-прежнему могут обфусцироваться; shrinking/optimization не отключены, blanket
+keep отсутствует. Правило действует в настоящем release и наследуемом p1Release.
+После обработки оба затронутых класса находятся в одном пакете
+(`kotlin.collections.r` и `kotlin.collections.s`), superclass доступен; проверяется
+вся известная APK-иерархия superclass/interfaces, а не только эти два имени.
+Startup provider и ProcessLifecycleInitializer остаются в manifest.
+
+**Optimization scope остаётся `androidx.**`, `kotlin.**`, `kotlinx.**`.**
+Storage, ICU, CBOR по-прежнему вне неё. Проверка подтверждает реальные backend calls
+из processed target, но не оптимизацию самого storage/ICU/CBOR. Сохраняются отличия
+p1Release: package suffix, локальная test signing, fallback и marker. Штатная
+release signing не меняется; приватные ключи/пароли не добавлены.
+
+`VerifyRuntimeApks` теперь читает access_flags, superclass и interfaces из class_defs,
+отклоняет cross-package nonpublic parent и любые общие target/test definitions.
+Также остаются проверки backend,3950 ICU files, pinned hashes, независимых golden
+и licenses. Режим `--hierarchy <APK>` используется для обычного release и негативной
+проверки исходных APK. Это структурный guard; он не эмулирует ART и не доказывает
+корректность всех обращений к полям/методам. Реальный Android runtime обязателен.
+
+### Проверка результата входит в единую пользовательскую команду
+
+Run configuration **P1 Release Runtime** теперь вызывает `p1ReleaseRuntimeCheck`.
+Граф: APK audit и host tests валидатора → `prepareP1RuntimeRun` →
+`connectedP1ReleaseAndroidTest` → строгая проверка XML. Прежний прямой connected
+запуск больше не является итоговой проверкой.
+
+Подготовка всегда заново удаляет прежние XML/HTML, промежуточные P1 results,
+additional output и runtime summary; сохраняет новый UUID и snapshot выбранных
+online API31+ устройств через SDK adb. Поддержан одиночный ANDROID_SERIAL;
+без него ожидаются все подключённые устройства. Offline/unauthorized/отсутствие
+устройств — ошибка. При одинаковых model/version требуется последовательный запуск,
+чтобы не угадывать соответствие AGP device name и serial. Connected task принудительно
+не UP-TO-DATE. Поздно подключённое/исчезнувшее устройство не может дать общий PASS.
+
+`VerifyRuntimeResults` требует семь конкретных методов `P1BackendRuntimeTest`
+**для каждого ожидаемого устройства**, каждый ровно один раз. Проверяет failure,
+error, skipped, suite counters/status, неполный/чужой набор, дубликаты, свежесть XML
+относительно manifest. Missing/zero/stale XML и crash runner завершают итоговую
+команду ошибкой. `testsuites` и вложенные `testsuite/testcase` обходятся по testcase
+один раз, родительские counts повторно не суммируются. DTD/external entities запрещены.
+Если connected task сама упала, Gradle останавливает цепочку без runtime PASS.
+
+В bytecode текущего `android-test-engine:1.0.1` дополнительно установлен изъян
+reporting: `XmlTestRunListener.testRunFailed` не записывает ошибку, результат
+создаётся уже при testStarted, XML errors/skipped выводятся как0. Поэтому семь
+XML cases сами по себе не доказывают семь завершённых PASS. Итоговый gate также
+требует свежие `test-result.pb` и `test-result-exit-code.txt` из той же results folder:
+exit0, suite PASSED без platform error, ровно7×число устройств **завершённых** test
+results, каждый PASSED без error, каждый ожидаемый method встречается ровно по
+числу устройств. Per-device XML проверяется отдельно, объединённый protobuf не
+суммируется с ним. Поля schema и пути выходных файлов проверены в bytecode
+AGP32.4.1 `AndroidTestEngineRunner`/`UtpTestUtilsKt` и его result listener.
+
+Для чтения используется host-only `p1ResultProtocol`: test-result-proto1.0.1 и его
+protobuf3.25.5, те же версии, которые уже использует AGP9.4.1 runner. Это новая
+связь **host-валидатора** с существующим форматом отчёта, не обновление инструментов
+или Android dependencies; ни в target, ни в instrumentation APK эти host JARs
+не добавляются. При смене AGP формат результата нужно пересмотреть, отсутствие
+обязательного machine result сейчас считается ошибкой, не PASS.
+
+Host regression suite из30 проверок покрывает полный PASS, вложенные wrappers,
+два устройства по7, zero, incomplete, failure, error, skipped, ненулевой summary,
+отсутствующий/устаревший/дублированный отчёт, неверный method/class/device,
+отсутствующие результаты одного устройства, status notrun, DTD, отсутствие manifest
+и удаление старого PASS перед запуском. Также проверяются противоречащие чистому XML
+runner crash/skipped/STARTED, отсутствие/неполный/старый/повреждённый protobuf,
+platform error и failed machine suite. Это fixtures для валидатора, не Android tests.
+Задача `testP1RuntimeResults` включена в `check`; Android test dependencies не менялись.
+
+Готовая команда PowerShell из корня актуальной ветки:
+
+```powershell
+.\gradlew.bat -Pp1ReleaseRuntime=true :app:p1ReleaseRuntimeCheck --console=plain
+```
+
+После выполнения ожидаются `runtime=PASS`, `variant=p1Release`, новый `runId`, строка
+`device=<serial> tests=7 failures=0 errors=0 skipped=0` для каждого устройства и
+BUILD SUCCESSFUL. Итог: `app/build/reports/p1-runtime/runtime-result.txt`;
+snapshot: `run.properties` рядом; XML/HTML и SHA256 audit — по путям выше.
+Windows-инструкция перечисляет точные семь имён тестов, устанавливаемые два APK,
+ошибки и нужные материалы, включая matching mapping при новом Process crashed.
+
+### Проверки исправления
+
+Результаты сборки, host tests и APK audit описаны далее отдельно от Android execution.
+
+Использованы нормативный wrapper9.6.0, AGP9.4.1, Kotlin2.2.10, JDK25.0.4.1,
+SDK37 и заполненный Gradle cache. Команды из корня репозитория (с настроенными
+JAVA_HOME/ANDROID_HOME/GRADLE_USER_HOME), без обновления Android dependencies:
+
+```bash
+bash ./gradlew :app:testP1RuntimeResults :app:testDebugUnitTest :app:lint :app:assembleDebug :app:assembleRelease :app:assembleDebugAndroidTest --offline --console=plain
+bash ./gradlew -Pp1ReleaseRuntime=true :app:testP1RuntimeResults :app:verifyP1ReleaseApks :app:lintP1Release :app:assembleRelease --offline --console=plain
+bash ./gradlew :app:testP1RuntimeResults :app:testDebugUnitTest --rerun --offline --console=plain
+bash ./gradlew -Pp1ReleaseRuntime=true :app:verifyP1ReleaseApks :app:lintP1Release :app:testP1RuntimeResults --offline --console=plain
+bash ./gradlew -Pp1ReleaseRuntime=true :app:p1ReleaseRuntimeCheck --dry-run --offline --console=plain
+bash ./gradlew -Pp1ReleaseRuntime=true :app:dependencies --configuration p1ReleaseRuntimeClasspath --offline --console=plain
+bash ./gradlew -Pp1ReleaseRuntime=true :app:dependencies --configuration p1ReleaseAndroidTestRuntimeClasspath --offline --console=plain
+python3 tools/p1/check-apk-audit.py
+java -cp app/build/p1-apk-verifier/classes VerifyRuntimeApks --hierarchy app/build/outputs/apk/release/app-release-unsigned.apk
+python3 tools/p1/fixtures.py --check
+python3 docs/architecture/reconciliation-materials/validate_docs.py
+git diff --check
+```
+
+Также выполнены `VerifyRuntimeApks --hierarchy` на сохранённых **до исправления**
+target/release APK с ожидаемым отказом, retrace по точному mapping,
+`aapt2 dump xmltree` обоих новых manifest и `apksigner verify --print-certs` обоих APK.
+Граф итоговой команды повторно проверен после добавления machine-result gate.
+
+| Проверка | Результат агента |
+| --- | --- |
+| Debug/release сборки, debug instrumentation APK, lint | BUILD SUCCESSFUL; debug lint0 errors/15 прежних warnings |
+| JVM unit tests, принудительный новый запуск `--rerun` | 35 tests,0 failures/errors/skipped; XML timestamp текущего запуска; включён ICU conformance, независимый unicodedata2 PASS остаётся исходным evidence |
+| Результат-валидатор, финальная версия | 30 host checks PASS, включая crash/skip/незавершённый test при чистом XML; Android NOT RUN |
+| P1 target/test R8, APK audit, lintP1Release | BUILD SUCCESSFUL; R8 включён для обоих APK; lint0 errors/15 прежних warnings |
+| Новый target и production release | По4547 definitions; `s` flags0x401 → `r` flags0x0000 внутри kotlin.collections; недопустимых superclass/interface package-access связей нет |
+| Новый instrumentation APK | 1722 definitions;0 общих definitions с target, включая Kotlin/AndroidX; backend/ICU resources не продублированы |
+| Исходные APK до исправления | Target и production release отклонены новым audit по точной связи Lbh; → Lkotlin/collections/j; |
+| APK audit negative tests | 4 отказа: debug substitution, backend DEX в test, повреждённый NFC resource, синтетический недоступный superclass; исходные signed APK не изменены |
+| Ресурсы/fixtures | 3950 ICU files, pinned NFC/repertoire hashes,21 S1 vectors, независимый CBOR golden/licenses PASS;28 frozen fixtures не изменены |
+| Runtime dependencies | В обоих resolved classpaths kotlin-stdlib2.2.10, lifecycle-process2.11.0, startup-runtime1.1.1; test constraints согласованы с target; конфликт версий причиной не установлен |
+| Конфигурация настоящего release / p1Release | configuration.txt совпадают после нормализации variant paths; packageScope не менялась, новое package rule присутствует в обоих |
+| Manifest/signing | Target non-debuggable, provider и ProcessLifecycleInitializer на месте; test targets p1runtime, обе подписи валидны с одинаковым локальным test certificate |
+| Host protocol reader | Читает существующий AGP schema через отдельную host configuration; target/test APK hashes после добавления reader не изменились |
+| Static docs checks / diff | 32 local links,26 tables,106 future IDs; git diff --check PASS |
+| Android execution | **НЕ ВЫПОЛНЕН АГЕНТОМ**: физический Honor недоступен; emulator executable/system image и /dev/kvm отсутствуют |
+
+Hashes конкретных локально собранных APK (подпись пользователя может дать другие):
+
+```text
+target SHA256: 70711b88cb826b5dc7222adeddf94b84557b3798e6bd1ad11fd6da79877bfb94
+test SHA256:   ea5e7f67223bfb35c8e6d97073ec6e4d1e91dd258eb7409efcb1f9a152c008f3
+release SHA256:e788f93374684efc638f375ad09c6c00ddaa0bdd5245399975b65b50281f4afa
+target/release new R8 map ID: d4b4cd746c84fb9df1c6e5274a6567ee1bbc29e3a3820dee0e3ca5e30fccd96d
+```
+
+Новый mapping **не** использован для старого crash с ID6ef4545c… . Build/audit/dry-run
+не выдаются за успешное Android execution. Unsafe/protobuf warning появился и при
+host protocol tests на JDK25, но не вызвал отказ; зависимости/JDK ради него не менялись.
+
+Оставшиеся условия: пользователь обновляет ветку и запускает одну готовую команду
+из Windows-инструкции сначала на Honor15, затем на второй конфигурации, например
+эмуляторе17, сохраняя результаты каждого запуска до следующего (новый запуск удаляет
+старые отчёты). Нужны **семь реально завершённых PASS на каждом устройстве** и
+успех итогового gate. До этих результатов исправление runtime требует подтверждения,
+P1 не полностью принят, PR6 сохраняется Draft и не сливается.

@@ -3,7 +3,7 @@ plugins {
     alias(libs.plugins.kotlin.compose)
 }
 
-// Opt-in instrumentation target; ordinary debug/release behavior and signing stay unchanged.
+// Opt-in instrumentation target; ordinary test selection and release signing stay unchanged.
 val p1ReleaseRuntime = providers.gradleProperty("p1ReleaseRuntime").orElse("false").get().toBooleanStrict()
 
 android {
@@ -77,6 +77,28 @@ dependencies {
     debugImplementation(libs.androidx.compose.ui.tooling)
 }
 
+// Host-only reader for the protocol ALREADY used by AGP9.4.1's Android test engine.
+// Not an app/androidTest dependency; no backend or protobuf copy is added to either APK.
+val p1ResultProtocol = configurations.create("p1ResultProtocol") {
+    isCanBeConsumed = false
+    isCanBeResolved = true
+}
+dependencies.add(p1ResultProtocol.name, "com.android.tools.androidtest:test-result-proto:1.0.1")
+val compileP1ResultVerifier = tasks.register<JavaCompile>("compileP1ResultVerifier") {
+    source(rootProject.file("tools/p1/VerifyRuntimeResults.java"), rootProject.file("tools/p1/VerifyRuntimeResultsTest.java"))
+    classpath = p1ResultProtocol
+    destinationDirectory.set(layout.buildDirectory.dir("p1-result-verifier/classes"))
+    options.release.set(11)
+}
+val testP1RuntimeResults = tasks.register<JavaExec>("testP1RuntimeResults") {
+    group = "verification"
+    description = "Exercise the host P1 result gate with passing/failing XML fixtures, without Android."
+    dependsOn(compileP1ResultVerifier)
+    classpath = files(compileP1ResultVerifier.flatMap { it.destinationDirectory }, p1ResultProtocol)
+    mainClass.set("VerifyRuntimeResultsTest")
+}
+tasks.named("check") { dependsOn(testP1RuntimeResults) }
+
 if (p1ReleaseRuntime) {
     // Error Prone annotations are compile-time metadata; IncompatibleModifiers references a JDK-only enum.
     // Keep them on the compile classpath, not in the R8-processed instrumentation APK. Production is unchanged.
@@ -102,7 +124,26 @@ if (p1ReleaseRuntime) {
             layout.buildDirectory.file("reports/p1-runtime/apk-audit.txt").get().asFile.absolutePath
         )
     }
-    tasks.matching { it.name == "connectedP1ReleaseAndroidTest" }.configureEach {
-        dependsOn(verifyP1ReleaseApks)
+    val prepareP1RuntimeRun = tasks.register<JavaExec>("prepareP1RuntimeRun") {
+        description = "Discard previous P1 results and snapshot selected online devices for this invocation."
+        dependsOn(verifyP1ReleaseApks, testP1RuntimeResults)
+        classpath = files(compileP1ResultVerifier.flatMap { it.destinationDirectory }, p1ResultProtocol)
+        mainClass.set("VerifyRuntimeResults")
+        args("prepare", layout.buildDirectory.get().asFile.absolutePath,
+            androidComponents.sdkComponents.adb.get().asFile.absolutePath)
+    }
+    val connectedP1 = tasks.matching { it.name == "connectedP1ReleaseAndroidTest" }
+    connectedP1.configureEach {
+        dependsOn(prepareP1RuntimeRun)
+        outputs.upToDateWhen { false }
+    }
+    tasks.register<JavaExec>("p1ReleaseRuntimeCheck") {
+        group = "verification"
+        description = "Run fresh processed-APK tests and require exactly seven P1 tests on EVERY selected device."
+        dependsOn(connectedP1)
+        classpath = files(compileP1ResultVerifier.flatMap { it.destinationDirectory }, p1ResultProtocol)
+        mainClass.set("VerifyRuntimeResults")
+        args("verify", layout.buildDirectory.get().asFile.absolutePath,
+            androidComponents.sdkComponents.adb.get().asFile.absolutePath)
     }
 }

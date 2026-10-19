@@ -4,6 +4,7 @@ import hashlib
 import os
 from pathlib import Path
 import subprocess
+import struct
 import tempfile
 import zipfile
 
@@ -22,6 +23,25 @@ def rewrite(source, dest, replacements):
     with zipfile.ZipFile(source) as src, zipfile.ZipFile(dest, 'w') as out:
         for entry in src.infolist():
             out.writestr(entry, replacements.get(entry.filename, src.read(entry)))
+
+def hierarchy_dex():
+    """Minimal class_defs parser fixture: public Child outside its package-private Parent's package.
+
+    Not an installable DEX (no code/checksum); exercises the host structural guard only.
+    """
+    names = [b'Lfixture/Parent;', b'LChild;']
+    strings, types, classes = 112, 120, 128
+    data = bytearray(classes + 2 * 32)
+    data[:8] = b'dex\n039\0'
+    for i, name in enumerate(names):
+        struct.pack_into('<I', data, strings + i * 4, len(data))
+        data += bytes([len(name)]) + name + b'\0'
+        struct.pack_into('<I', data, types + i * 4, i)
+        struct.pack_into('<IIIIIIII', data, classes + i * 32, i, i, 0xffffffff if i == 0 else 0, 0, 0, 0, 0, 0)
+    for offset, value in [(32, len(data)), (40, 0x12345678), (56, 2), (60, strings),
+                          (64, 2), (68, types), (96, 2), (100, classes)]:
+        struct.pack_into('<I', data, offset, value)
+    return bytes(data)
 
 def main():
     original = {p: digest(p) for p in [TARGET, TEST, DEBUG]}
@@ -46,6 +66,11 @@ def main():
         corrupt = tmp/'corrupt-unicode.apk'
         rewrite(TARGET, corrupt, {'com/ibm/icu/impl/data/icudata/nfc.nrm': bytes(data)})
         rejected('changed pinned NFC data', corrupt, TEST, 'Pinned ICU data hash mismatch')
+        inaccessible = tmp/'inaccessible-superclass.apk'
+        rewrite(TEST, inaccessible, {})
+        with zipfile.ZipFile(inaccessible, 'a') as out:
+            out.writestr('classes98.dex', hierarchy_dex())
+        rejected('public child outside nonpublic superclass package', TARGET, inaccessible, 'Inaccessible nonpublic superclass')
     assert all(digest(p) == value for p, value in original.items())
     print('APK audit negative checks: PASS; original signed APKs unchanged; runtime NOT RUN')
 
