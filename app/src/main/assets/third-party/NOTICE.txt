@@ -1,0 +1,9 @@
+Copper Scroll P1 storage dependencies (unmodified):
+
+com.ibm.icu:icu4j:76.1 — Unicode16.0.0. Unicode License V3 and bundled third-party notices: ICU-76.1.txt.
+Copyright © 2016-2024 Unicode, Inc.; earlier ICU/third-party notices retained in that license file.
+Origin https://github.com/unicode-org/icu/tree/release-76-1 ; Maven Central com/ibm/icu/icu4j/76.1.
+
+co.nstant.in:cbor:0.9 — CBOR for Java, Constantin Rack and contributors. Apache License2.0: CBOR-0.9.txt.
+Origin https://github.com/c-rack/cbor-java ; Maven Central co/nstant/in/cbor/0.9.
+No source modification or runtime transitive dependency for either artifact.

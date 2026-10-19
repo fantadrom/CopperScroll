@@ -1,0 +1,4 @@
+# Unicode16 independent reference; CPython3.12 Linux wheel or source build.
+unicodedata2==16.0.0 \
+    --hash=sha256:c042613e639dfb21ed024bf39079fe560974083efc5f14ae6efe0241fdfe0275 \
+    --hash=sha256:05488d6592b59cd78b61ec37d38725416b2df62efafa6a0d63a631b27aa474fc
