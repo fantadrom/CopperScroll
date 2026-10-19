@@ -1,0 +1,27 @@
+{
+  "checkedAt": "2026-10-19",
+  "base": "0e7b46cc1eff4059da4ce2f32b6194711801a16c",
+  "artifact": "org.bouncycastle:bcprov-jdk15to18:1.86",
+  "sha256": {
+    "bcprovBinary": "fc50334d4d87b4272e72fa95ca748ead05bdef02ef760a5b13f64ffee317cd81",
+    "bcprovSources": "434b5d4b25811177d950fb66640133950d749d4121c8ca49c2d89e9ffc5314db",
+    "bcprovPom": "af3f44f2c8bd90d10d0ebbc3c2f26b5d9b54588543a57cd879465f3dc4f1eef0",
+    "license": "b0503b35a90bc0bbeb76fa25283df7e3679b26a77fa1a8e0176ff0117ce39dc2",
+    "fixture": "6da2a18eff500ceca4982ef92fb94f4a2d1e3a997d69b14d32516a8bcba2a123"
+  },
+  "oracle": {
+    "python": "3.12.14",
+    "cryptography": "50.0.0",
+    "backend": "OpenSSL 4.0.1 9 Jun 2026"
+  },
+  "primarySources": [
+    "https://repo.maven.apache.org/maven2/org/bouncycastle/bcprov-jdk15to18/1.86/",
+    "https://www.bouncycastle.org/resources/new-release-bouncy-castle-java-1-86/",
+    "https://github.com/bcgit/bc-java/wiki",
+    "https://www.rfc-editor.org/rfc/rfc9106.html#section-5.3",
+    "https://www.rfc-editor.org/rfc/rfc5869.html#appendix-A.1",
+    "https://www.rfc-editor.org/rfc/rfc4231.html#section-4.2",
+    "https://csrc.nist.gov/CSRC/media/Projects/Cryptographic-Standards-and-Guidelines/documents/examples/AES_GCM.pdf"
+  ],
+  "claims": "Synthetic known-answer/format oracle only; no Android runtime or security certification"
+}

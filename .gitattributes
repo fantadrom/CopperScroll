@@ -1,0 +1,4 @@
+# Preserve frozen fixture/notices hashes on Windows checkouts as well as Unix.
+app/src/test/resources/p2/crypto.properties text eol=lf
+app/src/androidTest/assets/p2/crypto.properties text eol=lf
+app/src/main/assets/third-party/BC-1.86.txt text eol=lf

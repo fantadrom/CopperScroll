@@ -22,6 +22,12 @@ public final class VerifyRuntimeApks {
     private static final List<String> BACKEND = List.of(
         "Lcom/fantadrom/copperscroll/storage/access/SecretEncoding;",
         "Lcom/fantadrom/copperscroll/storage/access/CanonicalSecret;",
+        "Lcom/fantadrom/copperscroll/storage/access/CredentialManager;",
+        "Lcom/fantadrom/copperscroll/storage/crypto/ZoneKey;",
+        "Lcom/fantadrom/copperscroll/storage/crypto/RecordCrypto;",
+        "Lorg/bouncycastle/crypto/generators/Argon2BytesGenerator;",
+        "Lorg/bouncycastle/crypto/generators/Argon2BytesGenerator$BlockPool;",
+        "Lorg/bouncycastle/crypto/generators/HKDFBytesGenerator;", "Lorg/bouncycastle/crypto/macs/HMac;",
         "Lcom/fantadrom/copperscroll/storage/format/SettingsCodec;",
         "Lcom/fantadrom/copperscroll/storage/format/SettingsData;",
         "Lcom/ibm/icu/lang/UCharacter;", "Lcom/ibm/icu/text/Normalizer2;",
@@ -48,10 +54,28 @@ public final class VerifyRuntimeApks {
             checkHierarchy(appDefinitions); checkHierarchy(testDefinitions);
             Set<String> appClasses = appDefinitions.keySet(), testClasses = testDefinitions.keySet();
             require(appClasses.containsAll(BACKEND), "Processed target is missing backend definitions");
+            require(appClasses.stream().noneMatch(name -> name.startsWith("Lcom/fantadrom/copperscroll/storage/runtimechecks/")),
+                "Synthetic crypto test helpers must not ship in production target");
+            require(app.getEntry("assets/p2/crypto.properties") == null, "Synthetic key fixture must not ship in production target");
+            var zdk = appIndex.classes.get("Lcom/fantadrom/copperscroll/storage/crypto/ZoneKey;");
+            require((zdk.fields.getOrDefault("key:[B", 0) & 2) != 0, "ZDK storage must remain private");
+            require(zdk.methods.entrySet().stream().noneMatch(e -> (e.getValue() & 1) != 0 && e.getKey().endsWith(")[B")),
+                "ZoneKey must not expose a public raw-byte exporter");
             require(!appClasses.contains(TEST) && testClasses.contains(TEST), "Test class belongs in instrumentation APK only");
+            String p2Suite = "Lcom/fantadrom/copperscroll/storage/runtime/P2CryptoRuntimeTest;";
+            require(testClasses.contains(p2Suite) && !appClasses.contains(p2Suite), "P2 suite must belong to test APK only");
+            for (String method : List.of("primitiveKnownAnswers", "independentFormatFixture", "independentEnvelopesAndExpectedZone",
+                    "ambiguousCredentialAndUnchangedSecret", "kdfLimitsAndCancellation", "recordTamperingAndNoPlaintext",
+                    "freshRandomnessAndRngFailure", "prepareNewKeyAndCleanup"))
+                require((testIndex.classes.get(p2Suite).methods.getOrDefault(method + "()V", 0) & 1) != 0,
+                    "P2 expected runtime method missing from processed test APK: " + method);
+            boolean benchmark = Path.of(args[6]).getFileName().toString().equals("p2-benchmark");
+            require(testClasses.contains("Lcom/fantadrom/copperscroll/storage/runtime/P2KdfBenchmark;") == benchmark,
+                "KDF benchmark must be compiled only for the explicit benchmark profile");
             for (String name : testClasses) {
                 require(!name.startsWith("Lcom/fantadrom/copperscroll/storage/access/") &&
                     !name.startsWith("Lcom/fantadrom/copperscroll/storage/format/") &&
+                    !name.startsWith("Lcom/fantadrom/copperscroll/storage/crypto/") && !name.startsWith("Lorg/bouncycastle/") &&
                     !name.startsWith("Lcom/ibm/icu/") && !name.startsWith("Lco/nstant/in/cbor/"),
                     "Instrumentation APK contains a second backend implementation");
             }
@@ -73,13 +97,17 @@ public final class VerifyRuntimeApks {
                 "Android S1 vectors differ from frozen independent fixtures");
             require(new String(read(tests, "assets/p1/noncanonical-settings.hex", 1024), StandardCharsets.US_ASCII).trim()
                 .equals("980801f4f6f5f501f501"), "Noncanonical fixture changed");
-            for (String name : List.of("ICU-76.1.txt", "CBOR-0.9.txt", "NOTICE.txt"))
+            require(MessageDigest.isEqual(read(tests, "assets/p2/crypto.properties", 16384),
+                Files.readAllBytes(golden.getParent().getParent().resolve("p2/crypto.properties"))),
+                "Android P2 fixture differs from independent frozen JVM fixture");
+            for (String name : List.of("ICU-76.1.txt", "CBOR-0.9.txt", "BC-1.86.txt", "NOTICE.txt"))
                 require(app.getEntry("assets/third-party/" + name) != null, "License/NOTICE missing");
             String summary = "artifactAudit=PASS\nvariant=p1Release\nruntime=NOT_RUN\n" + identity + linkage +
                 "targetApk=" + target.getFileName() + "\ntestApk=" + test.getFileName() + "\n" +
                 "targetSha256=" + hash(Files.newInputStream(target)) + "\n" +
                 "testSha256=" + hash(Files.newInputStream(test)) + "\n" +
                 "targetBackendDefinitions=present\ntestBackendDefinitions=absent\n" +
+                "cryptoBackendAndBouncyCastle=target-only\nzdkPublicRawExporter=absent\n" +
                 "classHierarchyPackageAccess=PASS\nduplicateTargetTestDefinitions=0\n" +
                 "icuResourceFiles=" + resources + "\npinnedNfcAndRepertoireHashes=PASS\nindependentFixtures=PASS\n";
             Files.createDirectories(report.getParent()); Files.writeString(report, summary);
