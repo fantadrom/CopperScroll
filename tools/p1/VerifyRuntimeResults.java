@@ -35,6 +35,7 @@ public final class VerifyRuntimeResults {
         if (args[0].equals("prepare")) prepare(build, args[2]);
         else if (args[0].equals("verify")) {
             Path report = summary(build); Files.deleteIfExists(report);
+            verifyArtifactBinding(build);
             String result = verify(results(build), manifest(build));
             Files.createDirectories(report.getParent()); Files.writeString(report, result);
             System.out.print(result);
@@ -50,7 +51,33 @@ public final class VerifyRuntimeResults {
         clearPreviousResults(build);
         Map<String, String> devices = snapshot(adb, System.getenv("ANDROID_SERIAL"));
         saveManifest(manifest(build), devices);
+        bindArtifacts(build);
         System.out.println("P1 fresh run prepared: " + devices.size() + " device(s); previous runtime results removed");
+    }
+
+    private static final List<String> ARTIFACT_FIELDS = List.of("artifactBundleId", "targetSha256", "testSha256",
+        "targetMapId", "testMapId", "targetMappingSha256", "testMappingSha256");
+    private static Properties readProperties(Path path) throws IOException {
+        Properties properties = new Properties();
+        try (InputStream in = Files.newInputStream(path)) { properties.load(in); }
+        return properties;
+    }
+    static void bindArtifacts(Path build) throws Exception {
+        Properties artifacts = readProperties(build.resolve("reports/p1-runtime/artifact-manifest.properties"));
+        require(artifacts.getProperty("mappingMarkers", "").equals("PASS"), "Missing matching APK/mapping diagnostic snapshot");
+        Properties run = readProperties(manifest(build));
+        for (String field : ARTIFACT_FIELDS) {
+            String value = artifacts.getProperty(field, ""); require(!value.isBlank(), "Missing artifact identity: " + field);
+            run.setProperty(field, value);
+        }
+        try (OutputStream out = Files.newOutputStream(manifest(build))) { run.store(out, "Fresh run bound to both processed APKs and mappings"); }
+    }
+    static void verifyArtifactBinding(Path build) throws Exception {
+        Properties artifacts = readProperties(build.resolve("reports/p1-runtime/artifact-manifest.properties"));
+        Properties run = readProperties(manifest(build));
+        require(artifacts.getProperty("mappingMarkers", "").equals("PASS"), "APK/mapping diagnostic mismatch");
+        for (String field : ARTIFACT_FIELDS) require(!run.getProperty(field, "").isBlank() &&
+            run.getProperty(field).equals(artifacts.getProperty(field)), "Artifacts changed during runtime run: " + field);
     }
 
     static void clearPreviousResults(Path build) throws IOException {
@@ -178,6 +205,8 @@ public final class VerifyRuntimeResults {
         verifyRunnerProof(directory, manifest, count);
         StringBuilder summary = new StringBuilder("runtime=PASS\nvariant=p1Release\nrunId=")
             .append(run.getProperty("runId")).append("\n");
+        for (String field : ARTIFACT_FIELDS) if (run.containsKey(field))
+            summary.append(field).append('=').append(run.getProperty(field)).append('\n');
         for (var device : found.entrySet()) {
             require(device.getValue().equals(EXPECTED), "Incomplete runtime suite on " + device.getKey() +
                 ": expected 7, found " + device.getValue().size());

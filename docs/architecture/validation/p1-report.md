@@ -7,8 +7,9 @@
 Нормативная основа: согласованные design/format/test/prototype/resolution1.1,
 reconciliation-materials и текущий `editor/NoteDocument.kt`.
 
-**Статус: P1 частично выполнен; release runtime упал до тестов, подготовлено исправление;
-ожидаются подтверждённые семь тестов после R8 на Honor и второй Android-конфигурации.**
+**Статус: P1 частично выполнен; после исправления Kotlin access runner упал на Trace.
+Подготовлено согласование target/test ABI; нужны семь подтверждённых PASS после R8
+на Honor и второй Android-конфигурации.**
 Независимые Unicode conformance и normative-byte проверки выполнены. Сборка Android
 и упаковка ресурсов проверяются отдельно от исполнения: Android runner здесь
 отсутствует. Пользователь подтвердил debug instrumentation на Honor/Android15;
@@ -22,7 +23,8 @@ S1 — в `storage/access`; Android/Compose/View/URI/ContentResolver завис�
 minSdk31, Gradle9.6.0, AGP9.4.1, Kotlin2.2.10 и исходная область release optimization.
 После подтверждённого startup crash добавлено узкое правило сохранения пакета
 Kotlin collections; диагностика и влияние на настоящий release приведены в конце отчёта.
-В version catalog добавлены только две точно закреплённые зависимости.
+В production добавлены только две точно закреплённые зависимости. Текущий test runner
+закреплён отдельно в уже использовавшейся версии; детали нового test-only ABI ниже.
 
 - Codecs superblock1.1, descriptor18 и отдельно его точных logicalBytes0…15;
   PhysicalRef/LogicalRef, record header76 и bounded opaque ciphertext/tag;
@@ -601,3 +603,212 @@ host protocol tests на JDK25, но не вызвал отказ; зависи�
 старые отчёты). Нужны **семь реально завершённых PASS на каждом устройстве** и
 успех итогового gate. До этих результатов исправление runtime требует подтверждения,
 P1 не полностью принят, PR6 сохраняется Draft и не сливается.
+
+## NoClassDefFoundError Trace: согласование target/test ABI
+
+Исходная локальная и удалённая ветка перед изменениями:
+`20cae6b6f3255bb37afe854f8f56e3b38bf1ff61`; дерево чистое, PR6 Draft.
+Это отдельное продолжение после Kotlin package-access fix. Старые сборочные
+таблицы выше относятся к прежним коммитам; актуальные отличия p1Release приведены здесь.
+
+### Свежий пользовательский сбой и точный retrace
+
+Прочитаны `p1-honor-crash.txt` и `p1-honor-diagnostics.zip`. Для расследования
+выделен только Honor/Android15, время **16:03:54**, процесс p1runtime/PID625:
+`NoClassDefFoundError: Failed resolution of: Landroidx/tracing/Trace;`.
+Более ранние Kotlin IllegalAccessError из того же файла не объединялись с ним.
+Системные ошибки не использованы как evidence падения приложения.
+
+Test stack содержит map ID
+`9395cfa3fcb41421f1bf50caf850c29820751e5bb98539fcf0f3907ddd1f1b17`.
+Локально сохранённый **test** mapping имеет точно этот ID. Retrace тем же AGP-bundled
+R8 выполнен на свежем фрагменте журнала: `AndroidJUnitRunner.onCreate(AndroidJUnitRunner.java:307)`.
+Target mapping из ZIP имеет другой ID,
+`d4b4cd746c84fb9df1c6e5274a6567ee1bbc29e3a3820dee0e3ca5e30fccd96d`,
+и для этого retrace **не применялся**. В ZIP test mapping отсутствовал — это также
+устранено новым диагностическим архивированием.
+
+Пользовательский XML — `<testsuites tests="0" .../>`, runner exit-code файл —0.
+Сам merged protobuf разобран текущим AGP schema: status=PASSED, completedTests=0,
+platformError=false. Поэтому одних suite status/exit0 также недостаточно;
+существующий gate по-прежнему требует именно семь completed-test results.
+Это **НЕ PASS**, включая случай BUILD SUCCESSFUL. Ранее подтверждённый debug Honor
+`StorageDependencyTest`,1 passed, сохраняется отдельным пользовательским evidence.
+APK пользователя в ZIP не вложены; их записанные hashes отличаются от локальной
+тестовой подписи. Анализ реальных DEX выполнен на сохранённых локальных APK с
+соответствующими R8 IDs; не утверждается побайтное тождество пользовательским APK.
+
+### Установленная причина
+
+В старых target/test DEX нет определения `androidx.tracing.Trace`. В test DEX есть
+реальные invoke-static к трём API: `beginSection(String)`, `endSection()`,
+`forceEnableAppTracing()`, включая runner startup. В target mapping нет class entry
+Trace, но есть inline frames его begin/end методов в других классах; то же видно
+в пользовательском target mapping. Исходный класс не сохранён как доступный runtime API.
+
+Resolved tracing —1.2.0 в app/test; runner —1.7.0. Общая зависимость исключается
+из instrumentation APK, а target R8 оптимизирует её для приложения, не получая
+требований внешнего test consumer. Следовательно, Trace удалён/встроен в target
+и отсутствует в test из-за исключения общей зависимости. Это разрыв ABI между
+APK, а не доказанный конфликт версий или двух копий класса. Самостоятельному
+production release не требуется этот внешний runner API.
+
+В test R8 configuration подтверждено применение target `-applymapping`. Оно может
+переписать имена сохранённых symbols, но не восстанавливает удалённый класс.
+Добавление ещё одной записи той же dependency не гарантировало бы его упаковку.
+Прежний аудит absence-of-duplicates недостаточен: ноль копий требуемого класса
+также даёт ноль дубликатов. Статически показано отсутствие определения в обоих APK;
+любой из их loaders не может получить этот класс из данных двух DEX. Реальные
+Android class loaders здесь не запускались; их проверка добавлена в suite ниже.
+
+Анализ старого test DEX также выявил много отсутствующих shared type references,
+особенно из неиспользуемых Compose UI-test библиотек. Сырые type_ids включают metadata
+и не приравниваются к списку фактически проявившихся runtime crashes. Исправление
+проверяет всю оставшуюся границу runner/test → target, а не один Trace.
+
+### Исправление и отличие от настоящего release
+
+P1 instrumentation теперь использует прямой AndroidJUnitRunner1.7.0, уже ранее
+разрешавшийся в этой версии, AndroidJUnit4/core/monitor и их зависимости.
+Compose/Espresso UI-test dependencies сохранены для обычного debug; opt-in backend
+suite их не использует и не включает. Ни один из семи методов P1 не удалён/ослаблен.
+Production dependencies, wrapper9.6.0, AGP9.4.1, Kotlin2.2.10, ICU/CBOR и JDK не обновлялись.
+
+`generateP1RuntimeApi` читает реальные pre-R8 app/test class inputs через публичные
+ScopedArtifacts API AGP и resolved runtime artifacts. Общие classes исключаются
+из source по имени **и совпадению bytes**; различающиеся definitions дают ошибку.
+Текущий AGP-bundled R8 TraceReferences строит точечные keep rules для target ABI,
+используемого instrumentation. Зависимость графа: compiled test classes → generated
+keep rules → target R8 → target mapping → test R8. Цикла через processed APK нет.
+Подготовленные JARs используются только host tool, не добавляются в test APK.
+
+Правила генерируются в `app/build/generated/p1-runtime-api/keepRules/` и подключаются
+только к p1Release. Они сохраняют требуемые classes/members и их доступность,
+разрешая обфускацию там, где её поддерживает TraceReferences. В частности, Trace
+содержит три требуемых метода; test invokes переписаны к их фактическим target names.
+Таким же способом сохранены shared APIs futures, Kotlin и coroutines.
+
+Расширенный audit до нового пользовательского запуска обнаружил вторую проблему:
+test DEX вызывал `jn.probeCoroutineSuspended(Continuation)` после class/type mapping,
+а target содержал только переименованный `jn.a(...)`. Внутренний момент обработки R8,
+на котором метод перестал согласовываться, отдельно не доказывался. Для compiler-owned
+ABI добавлен p1Release-only `compiler-intrinsics.keep`: стабильные имена DebugProbesKt
+и трёх probe методов created/resumed/suspended. Это одна семья compiler entry points,
+а не отключение оптимизации Kotlin/coroutines целиком. После этого DEX audit проходит.
+
+При сокращённом test classpath R8 отдельно сообщил две отсутствующие compiler
+annotations: CanIgnoreReturnValue и MustBeClosed. Bytecode Error Prone проверен:
+первая имеет explicit CLASS retention, вторая — default CLASS retention. Два точных
+test-only dontwarn относятся только к этому metadata при прежнем исключении Error
+Prone runtime JAR с JDK-only enum. Никакие missing AndroidX/Kotlin runtime symbols
+не подавляются; generic dontwarn/dontshrink/dontoptimize не добавлялись.
+
+**R8 enable и packageScope остаются `androidx.**`, `kotlin.**`, `kotlinx.**`.**
+Storage/ICU/CBOR по-прежнему вне optimization scope. Штатный release не получает
+generated instrumentation ABI и compiler-intrinsics rules. Поэтому p1Release теперь
+отличается от него не только install ID/signing/fallback/marker, но и этими требованиями
+внешнего consumer к сохранению API. Runtime PASS будет evidence данного обработанного
+release-derived target; это не доказательство идентичного R8 результата обычного release.
+Startup provider/lifecycle не отключены; прежнее kotlin.collections package rule сохранено.
+
+### Расширенный APK audit, class loaders и диагностика
+
+`DexRuntimeLinkage` индексирует реальные DEX definitions, access flags, methods,
+fields, prototypes, inheritance и type/member instructions обработанного test APK.
+Неплатформенные operational/signature types должны существовать; method/field
+references разрешаются через target/test hierarchy и SDK stubs для унаследованных
+platform members. Для обращений к target проверяются class/member access и
+static/instance согласованность. Конструкторы не считаются унаследованными.
+Отсутствующие symbols не заменяются системными или test backend implementations.
+
+Граница проверки: это static instrumentation linkage, не ART verification,
+не доказательство reflection/динамической загрузки и не проверка доступности всех
+SDK37 APIs на Android15. Platform-owned methods не объявляются APK symbols.
+Явно учтён upstream AndroidX hidden bridge ExposedInstrumentationApi.execStartActivity:
+скрытые framework overloads отсутствуют в публичных SDK stubs; это отмечено отдельно
+в audit. Исключение не относится к missing shared target APIs. Ранний guard hierarchy,
+запрет дубликатов/backend copy,3950 ICU files/hashes и fixtures остаются обязательными.
+
+В существующий `@Before` P1 suite добавлены Trace class identity через target loader
+и реальные вызовы begin/end/forceEnable с фиксированной synthetic trace label.
+Новых test методов нет: ровно прежние семь, тот же production S1/codecs backend.
+Без Android runner фактическое разрешение этими loaders не объявляется проверенным.
+
+Каждый audit сохраняет **оба** mappings, обе эффективные R8 configurations и generated
+ABI rules в `reports/p1-runtime/artifacts/<bundleId>/`. Bundle ID вычисляется из SHA256
+APK/mappings/configurations/rules. Map IDs обязаны совпасть с embedded R8/PartialR8
+markers соответствующих DEX; подмена target mapping вместо test mapping даёт отказ.
+Снимки неизменяемые, отдельные build outputs не могут затереть прошлую диагностику.
+
+Готовый ZIP: `app/build/reports/p1-runtime/p1-diagnostics.zip`; manifest рядом и внутри
+содержит SHA256 обоих APK/mappings, component map IDs, config/rules hashes. Снимок
+сохраняется и при последующей неудаче semantic audit; mappingMarkers=PASS сам по себе
+не означает artifact/runtime PASS. Новая сборка может заменить latest ZIP, но сохраняет
+прежнюю hash-keyed копию; Clean Project удаляет build, поэтому ZIP надо копировать наружу.
+
+Run manifest и успешный runtime summary теперь содержат bundle ID и обе APK/map
+идентичности. При смене artifact identity между prepare/verify итоговая команда падает.
+Исходная защита от нуля/неполного набора/failed/errors/skipped и старых отчётов
+сохранена: требуются XML, completed statuses из protobuf и runner exit status.
+Host suite содержит33 проверки, включая binding/смену/отсутствие artifact identity.
+
+### Валидация и оставшиеся условия этого исправления
+
+Единая команда Windows **не меняется**:
+
+```powershell
+.\gradlew.bat -Pp1ReleaseRuntime=true :app:p1ReleaseRuntimeCheck --console=plain
+```
+
+Нужны `runtime=PASS`, новый run ID, artifact bundle ID и **семь завершённых PASS
+на каждом устройстве**,0 failures/errors/skipped, BUILD SUCCESSFUL итоговой задачи.
+Ожидаемые имена методов и материалы при ошибке перечислены в Windows-инструкции.
+Последний Honor zero-test run не закрывает gate; второй подтверждённый Android
+runtime также остаётся обязательным. PR6 сохраняется Draft, без merge.
+
+Реально выполненные финальные команды (с прежними JAVA_HOME/ANDROID_HOME/Gradle cache):
+
+```bash
+bash ./gradlew :app:testDebugUnitTest --rerun :app:testP1RuntimeResults :app:lint :app:assembleDebug :app:assembleRelease :app:assembleDebugAndroidTest --offline --console=plain
+bash ./gradlew -Pp1ReleaseRuntime=true :app:verifyP1ReleaseApks :app:lintP1Release :app:testP1RuntimeResults --offline --console=plain
+bash ./gradlew -Pp1ReleaseRuntime=true :app:p1ReleaseRuntimeCheck --dry-run --offline --console=plain
+python3 tools/p1/check-apk-audit.py
+python3 tools/p1/fixtures.py --check
+python3 docs/architecture/reconciliation-materials/validate_docs.py
+git diff --check
+```
+
+| Проверка | Фактический результат |
+| --- | --- |
+| Нормативные debug/release и debug test APK, lint | BUILD SUCCESSFUL; debug lint0 errors/15 прежних warnings |
+| JVM unit tests, новый `--rerun` | 35 tests,0 failures/errors/skipped; Unicode JVM evidence сохранено отдельно |
+| Host result gate | 33 checks PASS; Android NOT RUN |
+| P1 target/test R8, полный новый audit, lintP1Release | BUILD SUCCESSFUL; lint0 errors/15 прежних warnings |
+| Финальные DEX | target4634/test842 definitions,0 дубликатов; backend только в target |
+| Trace после обработки | target Lr81;, public final0x11; a(String)/b()/c() public static0x09; test ссылается именно на эти три definitions, собственной Trace copy нет |
+| Compiler probes | target DebugProbesKt с тремя стабильными probe именами, public static final0x19; test refs разрешаются |
+| Полный instrumentation linkage | PASS;5292 method refs,1577 field refs,21375 code edges; runtime class/member missing/access/static mismatch не найден |
+| Исходная согласованная пара APK до fix | Новый DEX linkage audit её отклоняет,532 distinct static problems в сохранённом test code; это консервативный scan всего test APK, не532 проявившихся P1 crashes |
+| APK negative checks | 8 ожидаемых отказов: debug substitution, backend copy, повреждённый ICU data, недоступный superclass, отсутствующий runner class, отсутствующий метод, метод private вместо public, target mapping вместо test mapping |
+| Snapshot ZIP | Оба mapping/configuration и API rules побайтно проверены по SHA256 manifest; embedded R8 markers соответствуют своим IDs |
+| Manifest/signatures | test targetPackage=p1runtime; Startup/lifecycle на месте; target non-debuggable; обе подписи валидны с общим локальным test certificate |
+| Обычный release | Hierarchy audit PASS; generated instrumentation rules ему не добавлены; не утверждается runtime PASS или тождество p1Release |
+| Итоговый граф команды | compiled instrumentation → generateP1RuntimeApi → target R8 → test R8 → audit → prepare → connected → result gate; dry-run успешен, это не запуск на Android |
+| Frozen fixtures / docs | 28 fixtures PASS;32 links/26 tables/106 IDs; diff whitespace check PASS |
+| Android runtime после этого fix | **НЕ ВЫПОЛНЕН АГЕНТОМ**: доступного телефона/эмулятора нет; emulator executable/system image и /dev/kvm отсутствуют |
+
+Конкретные локальные артефакты финального audit (другая локальная подпись меняет APK hashes):
+
+```text
+target SHA256: d1d09e3f5a02daf4ace95dff773c4db9779fc021bd2c00b3a59861f32132c012
+test SHA256:   581cca91b036b377554cff3ec5ce633052743a616b31869800cc507522299804
+target map ID: 529f88a32a9325ad09dd040ae69454f393aa64561e0efcef055d4c8952f9f763
+test map ID:   220bd9295f7f5f3f69dfa6dad8637b0fea4f1b16e5a5758b2c6191d70235ba90
+bundle ID:     2f3f534cb7a1f709953175c1b10b0f27a5f845a87e8591dee646c57d994e9f90
+```
+
+Новые mappings не использованы для retrace старого Honor crash. Предупреждение
+Unsafe/protobuf не вызвало отказа host checks; JDK/зависимости ради него не менялись.
+После Pull пользователь запускает прежнюю единую команду, сохраняет отчёт Honor
+и диагностический ZIP вне build, затем повторяет на второй Android-конфигурации.
+До семи завершённых PASS на каждом устройстве runtime fix не подтверждён, P1 не принят полностью.

@@ -3,6 +3,7 @@ package com.fantadrom.copperscroll.storage.runtime
 import android.content.pm.ApplicationInfo
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
+import androidx.tracing.Trace
 import co.nstant.`in`.cbor.CborDecoder
 import com.fantadrom.copperscroll.storage.access.CanonicalSecret
 import com.fantadrom.copperscroll.storage.access.SecretEncoding
@@ -39,9 +40,11 @@ class P1BackendRuntimeTest {
         // Direct calls below must resolve to classes accessible through the target application loader.
         // The build-time DEX audit separately proves these classes are not duplicated in the test APK.
         for (type in listOf(SecretEncoding::class.java, CanonicalSecret::class.java, SettingsCodec::class.java,
-            SettingsData::class.java, UCharacter::class.java, Normalizer2::class.java, CborDecoder::class.java)) {
+            SettingsData::class.java, UCharacter::class.java, Normalizer2::class.java, CborDecoder::class.java, Trace::class.java)) {
             assertSame("Backend is not loaded from target", type, target.classLoader.loadClass(type.name))
         }
+        Trace.beginSection("P1 synthetic runtime check")
+        try { Trace.forceEnableAppTracing() } finally { Trace.endSection() }
     }
 
     @Test fun targetApkLoadsPinnedUnicode16Data() {

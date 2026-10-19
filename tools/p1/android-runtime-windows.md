@@ -28,7 +28,9 @@
 Перед установкой автоматически выполняется `verifyP1ReleaseApks`. Она проверяет
 реальные определения классов DEX: backend есть в обработанном target APK, отсутствует
 в test APK; общих определений классов нет, superclass/interface с package-private
-доступом не вынесен в чужой пакет; pinned ICU resources и независимые fixtures совпадают с эталонами.
+доступом не вынесен в чужой пакет. Также проверяются фактические DEX-ссылки runner
+на классы, методы и поля, включая унаследованные members, доступ и static/instance.
+Pinned ICU resources и независимые fixtures совпадают с эталонами.
 Сообщение `artifactAudit=PASS` означает только готовность артефактов.
 
 Затем `prepareP1RuntimeRun` удаляет прежние P1 XML/HTML/служебные результаты и итоговый
@@ -49,13 +51,24 @@ Offline/unauthorized, API ниже31 или отсутствие устройс�
 нет. Штатный release signing не меняется. От настоящего release тестовый target
 отличается application ID suffix `.p1runtime`, локальной тестовой подписью,
 matchingFallbacks=`release` и служебным asset marker.
+Теперь есть дополнительные правила **только для p1Release**: текущий R8 автоматически
+сохраняет API target, используемый runner/test classes, с сохранением возможности
+обфускации. Отдельно закреплены имена трёх coroutine compiler-интринсиков DebugProbesKt:
+проверка DEX обнаружила их некорректный вызов после применения target mapping.
+Штатный release этих тестовых keep rules не получает. Поэтому результат относится
+к этому release-derived варианту; он не доказывает побайтное тождество обычного release.
 Только из runtime classpath test APK исключены compiler annotations
 `com.google.errorprone:error_prone_annotations`: их CLASS-retention annotation
 ссылалась на отсутствующий Android JDK enum и вызывала реальный R8 build failure.
-Compile classpath, production dependencies и R8 scope не изменены. Debug implementation dependencies
+Исключение не применяется к compile configuration. Production dependencies и R8 scope
+не изменены; test classpath соответствует сокращённому набору выше. Debug implementation dependencies
 в нём отсутствуют. Отдельный application ID позволяет сохранить обычную установку
 Copper Scroll; тесты не требуют открытия приложения, пароля или заметок.
 Диагностический UI/скрытый пользовательский вход не добавлен.
+Неиспользуемые Compose/Espresso test libraries остаются в обычном debug, но не
+включаются в P1 backend suite. AndroidJUnitRunner1.7.0 теперь подключён прямо в той
+же версии. Два точных compiler-metadata dontwarn относятся только к исключённым
+CLASS-retention Error Prone annotations; отсутствующие runtime API не подавляются.
 
 Исправление подтверждённого startup crash применяется и к настоящему release:
 `app/src/main/keepRules/kotlin-package-access.keep` содержит только
@@ -76,7 +89,8 @@ InitializationProvider и ProcessLifecycleInitializer остаются вклю�
 - `all21SyntheticS1GoldenVectors` (21 исходный S1 vector, включая отрицательные).
 
 Перед каждым проверяются package целевого APK, marker, debuggable=false и разрешение
-классов через target class loader. Затем вызываются реальные production S1/codecs.
+классов через target class loader, включая Trace; его три runner API вызываются
+с фиксированной синтетической trace label. Затем вызываются реальные production S1/codecs.
 Используются только synthetic vectors. Полный Unicode NormalizationTest на телефоне
 не запускается: он уже прошёл на JVM двумя независимыми реализациями.
 
@@ -110,16 +124,21 @@ release-запуски Honor15/эмулятор17 с нулём тестов н�
 - HTML: `app/build/reports/androidTests/connected/p1Release/index.html`;
 - XML/логи: `app/build/outputs/androidTest-results/connected/p1Release/`;
 - APK audit с SHA256: `app/build/reports/p1-runtime/apk-audit.txt`;
+- готовый архив **обоих** mappings/конфигураций: `app/build/reports/p1-runtime/p1-diagnostics.zip`;
+- их связь с SHA256 target/test APK: `app/build/reports/p1-runtime/artifact-manifest.properties`;
 - проверенный итог: `app/build/reports/p1-runtime/runtime-result.txt` (создаётся только при PASS);
 - текущий run ID/ожидаемые устройства: `app/build/reports/p1-runtime/run.properties`;
 - архитектурный статус: `docs/architecture/validation/p1-report.md`.
 
 При ошибке пришлите название failed task/test, последние строки ошибки из Build/Terminal,
-модель/версию Android и папку HTML/XML отчёта (если создана), вместе с папкой
-`app/build/reports/p1-runtime/`. При Process crashed также пришлите журнал именно
-процесса `com.fantadrom.copperscroll.p1runtime`, `app/build/outputs/mapping/p1Release/mapping.txt`
-**этой сборки** и map ID из стека. Сохраните mapping до следующей сборки: mapping с
-другим ID не подходит для достоверного retrace. Не смешивайте системный uwb-service с приложением.
+модель/версию Android и папку HTML/XML отчёта (если создана), вместе с
+`p1-diagnostics.zip`, `apk-audit.txt` и `run.properties` из `reports/p1-runtime/`.
+При Process crashed также пришлите журнал именно процесса
+`com.fantadrom.copperscroll.p1runtime`, время последнего запуска и map ID из стека.
+Сборка автоматически сохраняет mappings **target и test** и проверяет совпадение
+их ID с R8 markers соответствующего APK. В ZIP есть SHA256 каждого APK и mapping.
+Target mapping нельзя использовать для стека runner с другим ID.
+Не смешивайте старые падения и системный uwb-service с последним запуском.
 Не нужны пароли, содержимое заметок или целый пользовательский контейнер.
 Warnings `sun.misc.Unsafe`/`com.google.protobuf` сами по себе не означают отказ: оценивать
 exit status и результаты тестов. Не менять JDK/зависимости только для скрытия warnings.
@@ -128,5 +147,9 @@ exit status и результаты тестов. Не менять JDK/зави
 (например, другое физическое устройство или эмулятор с другой версией ОС), оставив
 подключённой только её. **Перед повтором сохраните первую папку XML/логов, HTML и
 `reports/p1-runtime/` вне `app/build/`**: следующий запуск удаляет прежние результаты.
+Архивы mappings дополнительно сохраняются в `reports/p1-runtime/artifacts/<bundleId>/`;
+обычный повтор их не удаляет, но Clean Project или удаление build удалят и их.
+Run manifest и итоговый runtime summary содержат bundle ID и SHA обоих APK;
+изменение этой идентичности во время прогона завершает команду ошибкой.
 Повтор на том же Honor не заменяет вторую конфигурацию.
 Пришлите результаты обоих прогонов; до них P1 и PR6 остаются в частичном/Draft статусе.

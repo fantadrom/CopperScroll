@@ -1,0 +1,5 @@
+# These two compiler annotations have CLASS retention (MustBeClosed uses the default).
+# The existing instrumentation-only Error Prone runtime exclusion avoids its JDK-only enum.
+# Neither annotation is a runtime API. This does not suppress any AndroidX/Kotlin linkage error.
+-dontwarn com.google.errorprone.annotations.CanIgnoreReturnValue
+-dontwarn com.google.errorprone.annotations.MustBeClosed

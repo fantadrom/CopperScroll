@@ -1,0 +1,9 @@
+# R8's coroutine instrumentation can introduce these calls after target mapping is applied.
+# APK audit found test -> renamed DebugProbesKt.probeCoroutineSuspended, while target had only a(...).
+# Keep this compiler-owned ABI stable in the test target, including the related probe intrinsics.
+# Production release scope/rules are unaffected; other shared APIs may still be obfuscated.
+-keep class kotlin.coroutines.jvm.internal.DebugProbesKt {
+    public static kotlin.coroutines.Continuation probeCoroutineCreated(kotlin.coroutines.Continuation);
+    public static void probeCoroutineResumed(kotlin.coroutines.Continuation);
+    public static void probeCoroutineSuspended(kotlin.coroutines.Continuation);
+}

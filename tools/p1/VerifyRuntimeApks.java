@@ -28,13 +28,22 @@ public final class VerifyRuntimeApks {
         "Lco/nstant/in/cbor/CborDecoder;", "Lco/nstant/in/cbor/CborEncoder;");
 
     public static void main(String[] args) throws Exception {
+        if (args.length >= 4 && args[0].equals("--linkage")) {
+            System.out.print(DexRuntimeLinkage.check(DexRuntimeLinkage.apk(Path.of(args[1]), false),
+                DexRuntimeLinkage.apk(Path.of(args[2])), java.util.Arrays.stream(args).skip(3).map(Path::of).collect(java.util.stream.Collectors.toList())));
+            System.out.println("runtime=NOT_RUN"); return;
+        }
         if (args.length == 2 && args[0].equals("--hierarchy")) {
             try (ZipFile apk = new ZipFile(args[1])) { checkHierarchy(definitions(apk)); }
             System.out.println("classHierarchyPackageAccess=PASS; runtime=NOT_RUN"); return;
         }
-        require(args.length == 4, "Expected target APK, test APK, frozen golden and report");
+        require(args.length >= 9, "Expected APKs, golden, report, both mappings, diagnostic directory, generated rules and platform libraries");
         Path target = Path.of(args[0]), test = Path.of(args[1]), golden = Path.of(args[2]), report = Path.of(args[3]);
+        Files.createDirectories(report.getParent()); Files.deleteIfExists(report);
+        Files.write(report.resolveSibling("audit-arguments.txt"), List.of(args), StandardCharsets.UTF_8);
         try (ZipFile app = new ZipFile(target.toFile()); ZipFile tests = new ZipFile(test.toFile())) {
+            var appIndex = DexRuntimeLinkage.apk(target, false); var testIndex = DexRuntimeLinkage.apk(test);
+            String identity = P1ArtifactDiagnostics.save(target, test, Path.of(args[4]), Path.of(args[5]), Path.of(args[7]), Path.of(args[6]), appIndex.mapIds, testIndex.mapIds);
             Map<String, Definition> appDefinitions = definitions(app), testDefinitions = definitions(tests);
             checkHierarchy(appDefinitions); checkHierarchy(testDefinitions);
             Set<String> appClasses = appDefinitions.keySet(), testClasses = testDefinitions.keySet();
@@ -48,6 +57,8 @@ public final class VerifyRuntimeApks {
             }
             Set<String> shared = new HashSet<>(appClasses); shared.retainAll(testClasses);
             require(shared.isEmpty(), "Duplicate target/test runtime class definitions: " + shared);
+            String linkage = DexRuntimeLinkage.check(appIndex, testIndex,
+                java.util.Arrays.stream(args).skip(8).map(Path::of).collect(java.util.stream.Collectors.toList()));
             long resources = app.stream().filter(e -> e.getName().startsWith(ICU) && !e.isDirectory()).count();
             require(resources == 3950, "Unexpected pinned ICU resource set");
             require(tests.stream().noneMatch(e -> e.getName().startsWith(ICU)), "ICU data duplicated in test APK");
@@ -64,7 +75,7 @@ public final class VerifyRuntimeApks {
                 .equals("980801f4f6f5f501f501"), "Noncanonical fixture changed");
             for (String name : List.of("ICU-76.1.txt", "CBOR-0.9.txt", "NOTICE.txt"))
                 require(app.getEntry("assets/third-party/" + name) != null, "License/NOTICE missing");
-            String summary = "artifactAudit=PASS\nvariant=p1Release\nruntime=NOT_RUN\n" +
+            String summary = "artifactAudit=PASS\nvariant=p1Release\nruntime=NOT_RUN\n" + identity + linkage +
                 "targetApk=" + target.getFileName() + "\ntestApk=" + test.getFileName() + "\n" +
                 "targetSha256=" + hash(Files.newInputStream(target)) + "\n" +
                 "testSha256=" + hash(Files.newInputStream(test)) + "\n" +
@@ -140,7 +151,7 @@ public final class VerifyRuntimeApks {
         if (!condition) throw new IllegalStateException(message);
     }
     /** Minimal bounded reader of standard build-tools DEX header/type/string/class_defs tables. */
-    private static final class Dex {
+    static final class Dex {
         final byte[] data; final ByteBuffer b;
         Dex(byte[] data) {
             this.data = data; this.b = ByteBuffer.wrap(data).order(ByteOrder.LITTLE_ENDIAN);
@@ -151,12 +162,16 @@ public final class VerifyRuntimeApks {
         void range(int offset, long count) { require(offset >= 0 && count >= 0 && count <= data.length - (long) offset, "DEX bounds"); }
         int u32(int offset) { range(offset, 4); int value = b.getInt(offset); require(value >= 0, "DEX index too large"); return value; }
         String descriptor(int type) {
-            require(type < u32(64), "DEX type bounds");
-            int string = u32(u32(68) + type * 4); require(string < u32(56), "DEX string bounds");
+            require(type >= 0 && type < u32(64), "DEX type bounds");
+            String result = string(u32(u32(68) + type * 4));
+            require(result.length() <= 4096, "DEX descriptor too long"); return result;
+        }
+        String string(int string) {
+            require(string >= 0 && string < u32(56), "DEX string bounds");
             int start = u32(u32(60) + string * 4); int width = 0;
             do { range(start, 1); require(++width <= 5, "DEX ULEB128 too long"); } while ((data[start++] & 128) != 0);
             int end = start;
-            while (true) { range(end, 1); if (data[end] == 0) break; require(end++ - start < 4096, "DEX descriptor too long"); }
+            while (true) { range(end, 1); if (data[end] == 0) break; require(end++ - start < 1024 * 1024, "DEX string too long"); }
             return new String(data, start, end - start, StandardCharsets.UTF_8);
         }
     }

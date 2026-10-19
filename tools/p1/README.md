@@ -60,21 +60,42 @@ Shared Android Studio Gradle run configuration: **P1 Release Runtime**. Equivale
 .\gradlew.bat -Pp1ReleaseRuntime=true :app:p1ReleaseRuntimeCheck --console=plain
 ```
 
-`p1Release` inherits release optimization/R8 unchanged; only the install identity,
-local test signing, dependency matching fallback and a non-UI asset marker differ.
+`p1Release` inherits release R8 enable/packageScope, with additional instrumentation
+ABI rules described below. Install identity, local test signing, dependency matching
+fallback and a non-UI asset marker also differ.
 Normal release signing is untouched. Current optimization scope is only `androidx.**`,
 `kotlin.**`, `kotlinx.**`; storage/ICU/CBOR are outside it. A pass validates backend calls
 in the APK after the existing R8 pipeline, not optimization of these excluded packages.
 One actual test-only build failure (`javax.lang.model.element.Modifier` from Error Prone
 annotations) is resolved by excluding that compiler-metadata artifact only from the
-P1 instrumentation runtime classpath. It remains on the compile classpath.
+P1 instrumentation runtime classpath; the exclusion does not apply to compile configuration.
 The later confirmed startup crash required one shared release rule:
 `app/src/main/keepRules/kotlin-package-access.keep` uses
 `-keeppackagenames kotlin.collections.**`. Partial R8 had moved a subclass outside its
 package-private superclass's package, in both real release and p1Release. Only this
 package boundary is retained; class/member obfuscation, shrinking, optimization and
-packageScope remain enabled. No dontwarn, dependency upgrades, Startup removal or
-global R8 disablement is used. The repository wrapper remains Gradle9.6.0.
+packageScope remain enabled. No dependency upgrades, Startup removal or global R8
+disablement is used. The repository wrapper remains Gradle9.6.0.
+
+The later Honor crash at16:03:54 was a separate `NoClassDefFoundError` in runner onCreate:
+Trace was inlined/removed in target, then excluded from test as a shared dependency.
+`generateP1RuntimeApi` now uses the SAME AGP-bundled R8 TraceReferences to derive
+target keep rules from the actual compiled test classes and test-only libraries.
+Shared input classes are deduplicated by name AND bytes; only referenced target
+classes/members are retained, obfuscation remains permitted and target mapping is
+still applied to instrumentation. This extra ABI is specific to p1Release; real
+release does not receive generated test rules. Production sources/dependencies and
+optimization packageScope remain unchanged; this is not byte-identical release verification.
+
+The extended DEX audit also found a compiler coroutine-intrinsic call whose class was
+mapped but method was not. `src/p1Release/keepRules/compiler-intrinsics.keep` keeps
+the names of DebugProbesKt and its three compiler probe methods for this test target.
+Compose/Espresso UI-test dependencies remain in normal debug testing, but are absent
+from the opt-in backend suite. Runner1.7.0 is now direct (same previously resolved
+version), with AndroidJUnit4/core/monitor and their runtime dependencies.
+Two exact `dontwarn` entries in androidTest keep rules cover excluded Error Prone
+CanIgnoreReturnValue/MustBeClosed compiler metadata (CLASS retention), not runtime
+classes. No AndroidX/Kotlin missing runtime symbol is suppressed.
 
 The opt-in selects `testBuildType=p1Release` and only `P1BackendRuntimeTest` (7 tests,
 including all21 synthetic S1 vectors). Without it, default debug instrumentation remains
@@ -93,6 +114,24 @@ The audit now also rejects nonpublic superclass/interface access across packages
 any duplicated target/test class definitions. These are actual DEX definitions, not
 mere references. Production release can be checked with the same audit's
 `--hierarchy <APK>` mode.
+It also indexes real DEX method/field definitions, prototypes, superclass/interfaces
+and live instruction references, resolves inherited members with SDK stubs, and
+checks shared target access flags/static-vs-instance calls. All non-platform code
+types and method/field references must resolve. Reflection and actual device API
+availability still require runtime. Platform methods are not treated as APK-owned
+symbols; the explicit AndroidX ExposedInstrumentationApi.execStartActivity hidden
+framework bridge is reported separately because public SDK stubs omit those methods.
+The existing before-test target-loader identity check now includes Trace and calls
+its three runner APIs using only a fixed synthetic trace label.
+
+Every audit snapshots BOTH mappings and effective R8 configurations plus generated
+ABI rules in `app/build/reports/p1-runtime/artifacts/<bundleId>/`, keyed by APK/map/
+config SHA256. Their IDs must match embedded R8 markers in the respective DEX.
+Ready archive: `app/build/reports/p1-runtime/p1-diagnostics.zip`; its manifest binds
+target/test APK hashes to the correct component mapping IDs and hashes. Snapshots
+survive subsequent runs (until clean/build deletion); copy the ZIP outside build
+before cleaning. The run manifest/checked runtime summary also carry the bundle ID
+and both artifact identities; a changed identity during execution fails the command.
 
 The shared run configuration invokes `p1ReleaseRuntimeCheck`, not a bare connected
 task. Its prerequisite `prepareP1RuntimeRun` removes previous P1 reports/results and
@@ -135,7 +174,8 @@ disagreement, unexpected methods/classes/devices, stale/duplicate reports, non-r
 status, missing manifest, XML external entities and removal of old results/summary.
 It also tests clean XML contradicted by runner crash/skipped/unfinished status,
 missing/partial/stale/corrupt machine results, platform errors and failed suite:
-30 host checks in total. The final gate requires both XML and machine results.
+33 host checks in total, including artifact binding/change/missing-snapshot cases.
+The final gate requires both XML and machine results.
 An assembled APK, audit PASS or dry-run is not a runtime PASS. Honor release-runtime and
 another Android configuration API31+ remain open until actual results arrive. The same
 ready command runs the21 S1 vectors on each configuration. Current acceptance/evidence

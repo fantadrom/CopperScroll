@@ -72,6 +72,20 @@ public final class VerifyRuntimeResultsTest {
             if (Files.exists(oldXml) || Files.exists(VerifyRuntimeResults.manifest(build)) ||
                 Files.exists(VerifyRuntimeResults.summary(build))) throw new AssertionError("Previous PASS survived preparation");
             checks++;
+            Path bound = Files.createTempDirectory(root, "bound-");
+            VerifyRuntimeResults.saveManifest(VerifyRuntimeResults.manifest(bound), Map.of("honor", "Honor - 15"));
+            Path identity = bound.resolve("reports/p1-runtime/artifact-manifest.properties");
+            String metadata = "mappingMarkers=PASS\nartifactBundleId=bundle\ntargetSha256=target\ntestSha256=test\n" +
+                "targetMapId=target-map\ntestMapId=test-map\ntargetMappingSha256=target-mapping\ntestMappingSha256=test-mapping\n";
+            Files.writeString(identity, metadata); VerifyRuntimeResults.bindArtifacts(bound);
+            VerifyRuntimeResults.verifyArtifactBinding(bound); checks++;
+            Files.writeString(identity, metadata.replace("artifactBundleId=bundle", "artifactBundleId=other"));
+            boolean rejected = false;
+            try { VerifyRuntimeResults.verifyArtifactBinding(bound); } catch (IllegalStateException expected) { rejected = true; }
+            if (!rejected) throw new AssertionError("Changed artifacts accepted"); checks++;
+            Files.delete(identity); rejected = false;
+            try { VerifyRuntimeResults.verifyArtifactBinding(bound); } catch (java.io.IOException expected) { rejected = true; }
+            if (!rejected) throw new AssertionError("Missing artifact identity accepted"); checks++;
             System.out.println("P1 runtime result verifier: " + checks + " checks PASS (host fixtures only; Android NOT RUN)");
         } finally {
             try (var paths = Files.walk(root)) {
