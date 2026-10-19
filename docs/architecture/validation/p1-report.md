@@ -7,13 +7,15 @@
 Нормативная основа: согласованные design/format/test/prototype/resolution1.1,
 reconciliation-materials и текущий `editor/NoteDocument.kt`.
 
-**Статус: P1 частично выполнен; после исправления Kotlin access runner упал на Trace.
-Подготовлено согласование target/test ABI; нужны семь подтверждённых PASS после R8
-на Honor и второй Android-конфигурации.**
+**Статус: условия приёмки P1 по runtime после R8 и матрице двух Android-конфигураций
+закрыты подтверждёнными пользовательскими прогонами после `a34bd5f`: Honor ABR-LX1 /
+Android15 и эмулятор / Android17, по семь PASS на каждом.**
 Независимые Unicode conformance и normative-byte проверки выполнены. Сборка Android
 и упаковка ресурсов проверяются отдельно от исполнения: Android runner здесь
-отсутствует. Пользователь подтвердил debug instrumentation на Honor/Android15;
-эта отдельная категория evidence описана ниже. P1 не создаёт защищённый пользовательский контейнер.
+отсутствует. Release runtime выполнен пользователем на Windows с Gradle9.8.0,
+не агентом; результат относится к p1Release с ограничениями, указанными ниже.
+Ранее подтверждённый debug instrumentation на Honor/Android15 сохранён отдельно.
+P1 не создаёт защищённый пользовательский контейнер.
 
 ## Реализация
 
@@ -217,10 +219,10 @@ asset merger duplicate resources; оба запуска остановлены, 
 | SCHEMA-03 | Raw unknown enum/icon round-trip, отдельный display fallback, fixed icons rejected | UI selection, copy/rekey сохранение в настоящем файле |
 | FILE-04 | Strict1.1/feature/schema отказ, newer-slot unknown не скрывается старым | Writer lockout, read-only UI sessions, selected/unselected maintenance |
 | FILE-05 | Bounded parser/public graph, overflow/overlap/cycles/fanout/depth/nesting, fixed-seed malformed tests | FD/SAF races и полный authenticated object graph |
-| S1-01 |21 synthetic vectors двумя независимыми реализациями | Два Android устройства, create/open |
-| S1-02 | Полный официальный conformance обоих backend; raw/normalized/repertoire/malformed limits | Повторение pinned-library path на Android |
+| S1-01 |21 synthetic vectors двумя независимыми реализациями; пользовательский P1 suite на Honor15 и эмуляторе17 после a34bd5f | Полный encrypted create/open |
+| S1-02 | Полный официальный conformance обоих backend; raw/normalized/repertoire/malformed limits; pinned-library path в пользовательском suite на обеих Android-конфигурациях | Полный Unicode corpus на Android не повторялся и не требуется |
 | S1-03 | Runtime data-version/probe gate; unit simulation версии15/missing backend; отсутствие OS fallback | Android capability failures при packaging/runtime incompatibility |
-| S1-04 | Cross-method equality, leading zeros, whitespace/case, private-use, unassigned/newer-than16 и midpoint order | Равенство результата на старом/новом Android устройстве |
+| S1-04 | Cross-method equality, leading zeros, whitespace/case, private-use, unassigned/newer-than16 и midpoint order; те же21 S1 vectors на Honor15 и эмуляторе17 | Другие Android-конфигурации вне выполненной матрицы |
 
 Android runner отсутствует: нет emulator executable или system image; installed SDK
 содержит platforms/build-tools/platform-tools. `adb devices -l` завершился до discovery:
@@ -230,17 +232,20 @@ ANDROID_USER_HOME/ANDROID_SDK_HOME этот adb binary не перенаправ
 `StorageDependencyTest` добавлен и test APK собран. Позже пользователь подтвердил
 его фактический debug-запуск; это не собственный запуск агента и не release runtime.
 
-Release/R8 build и наличие ICU data/notices в APK проверены. S1/CBOR runtime **после
-R8 на Android не выполнен**. Новый storage слой пока недостижим из UI; исходный optimization packageScope сохранён.
+На исходном этапе были проверены Release/R8 build и наличие ICU data/notices в APK,
+а S1/CBOR runtime после R8 ещё не был выполнен. Этот gate впоследствии закрыт
+пользовательскими прогонами после `a34bd5f`, описанными в конце отчёта.
+Новый storage слой пока недостижим из UI; исходный optimization packageScope сохранён.
 Сборка и наличие resources сами по себе не доказывают выполнение backend calls после R8.
-Перед приёмкой P1 требуются полный runtime suite API31+, two-device S1 matrix и runtime smoke
-release/R8 с реальными вызовами storage backend. Новые keep rules и ослабление R8
+Для приёмки P1 требовались полный runtime suite API31+, two-device S1 matrix и runtime smoke
+release/R8 с реальными вызовами storage backend; эти условия теперь закрыты для p1Release.
+Новые keep rules и ослабление R8
 для получения формального PASS на исходном этапе не добавлялись. Последующее
 обоснованное исправление package access после реального crash описано ниже.
 
-P2 может использовать проверенные модели/bytes и S1 для отдельной crypto разработки,
-сохраняя указанный gate открытым. P1 полностью принятым и пользовательским хранилищем
-не объявлен. Argon2/encryption/key management, authentication, transactional writer,
+P2 может использовать проверенные модели/bytes и S1 для отдельной crypto разработки.
+Закрытие runtime gates P1 не означает приёмку пользовательского хранилища.
+Argon2/encryption/key management, authentication, transactional writer,
 recovery/durability, SAF, lifecycle и UI integration не реализованы и не проверены.
 
 
@@ -255,8 +260,8 @@ PR open/Draft, без merge. Ниже отделены новые evidence от 
 | JVM + независимый Unicode16 conformance | PASS агента в исходном P1: ICU4J76.1 и unicodedata2, полный официальный corpus;35 unit tests |
 | Debug instrumentation на Honor | **PASS пользователя**: физический Honor ABR-LX1, Android15; по описанию скриншота `:app:connectedDebugAndroidTest`, `pinnedUnicodeAndCborOnAndroid`,1 passed / BUILD SUCCESSFUL |
 | Сборка release/R8 и release-derived instrumentation | Подготовка и проверки артефактов агента; результаты команд ниже, это не исполнение на устройстве |
-| Runtime после R8 на Honor | **НЕ PASS**: позднейший пользовательский запуск дал XML tests="0"; требуется повтор после исправления |
-| Вторая Android-конфигурация API31+ | **НЕ PASS**: эмулятор Android17 также дал tests="0"; успешная семитестовая матрица не выполнена |
+| Runtime после R8 на Honor | **PASS пользователя после a34bd5f**: Honor ABR-LX1 / Android15; все7 ожидаемых методов,0 failures,0 skipped; итоговый p1ReleaseRuntimeCheck BUILD SUCCESSFUL |
+| Вторая Android-конфигурация API31+ | **PASS пользователя после a34bd5f**: эмулятор / Android17; те же7 методов,0 failures,0 skipped; итоговый p1ReleaseRuntimeCheck BUILD SUCCESSFUL |
 
 Пользовательский debug run не обозначается release-проверкой или прогоном нового
 семитестового suite. Warnings `sun.misc.Unsafe` / `com.google.protobuf` не помешали
@@ -269,11 +274,12 @@ PR open/Draft, без merge. Ниже отделены новые evidence от 
 `minifyP1ReleaseWithR8`. Исходные `optimization.enable=true` и packageScope
 `androidx.**`, `kotlin.**`, `kotlinx.**` сохранены. **Storage `com.fantadrom...`,
 ICU `com.ibm.icu...` и CBOR `co.nstant.in...` не входят в область optimization.**
-Runtime PASS подтвердит их работу из APK после существующей обработки, но не
+Runtime PASS подтверждает их работу из APK после существующей обработки, но не
 прохождение их собственного кода через optimization. Область не расширялась,
 на шаге подготовки keep/dontwarn rules не добавлялись, R8 не отключался (включая test APK).
-Текущая версия добавляет только обоснованное `keeppackagenames` после выявленного crash;
-область optimization остаётся прежней.
+Первое исправление добавило обоснованное `keeppackagenames` после выявленного crash;
+последующие p1Release-only ABI rules и пределы результата описаны в разделе Trace ниже.
+Область optimization остаётся прежней.
 
 Production sources, SDK/minSdk/Gradle/AGP/Kotlin, common dependencies и release
 поведение не менялись. Отличия installable test target от настоящего release:
@@ -337,8 +343,9 @@ XML/logs: `app/build/outputs/androidTest-results/connected/p1Release/`.
 На второй Android-конфигурации запускается та же команда.
 
 Здесь подходящий Android runner отсутствует: emulator/system image не установлены,
-Honor пользователя находится вне среды агента. Фактическое выполнение остаётся
-пользователю. P1 не объявляется полностью принятым, PR6 остаётся Draft до результатов.
+Honor пользователя находится вне среды агента. На этапе подготовки выполнение было
+оставлено пользователю; позднее он подтвердил успешные прогоны на обеих конфигурациях
+после `a34bd5f` (см. последнее дополнение). PR6 остаётся Draft, без merge.
 
 ### Выполненные агентом проверки этого дополнения
 
@@ -380,10 +387,11 @@ target: 7d68730e40087bf951a05be199dd48cce70c9c618d8d7da34bc4f07730d98661
 test:   7c0f4809c40474f8363d4bb69c2875e39fbe497ddb17d1ccc998be720404c12f
 ```
 
-Открытые условия не сняты: **runtime7 tests на Honor после R8**, затем тот же suite
-на **второй Android-конфигурации API31+**. User debug PASS не распространяется на них.
+На момент этой подготовки оставались открыты **runtime7 tests на Honor после R8**
+и тот же suite на **второй Android-конфигурации API31+**. Они закрыты последующим
+подтверждением пользователя после `a34bd5f`; user debug PASS учитывается отдельно.
 Ожидаемые имена тестов, какие APK устанавливаются, отчёты и состав сообщения при
-ошибке указаны в Windows-инструкции. PR остаётся Draft, P1 — частично выполненным.
+ошибке указаны в Windows-инструкции. PR остаётся Draft.
 
 ## Исправление P1 Release Runtime crash и защита от нулевого результата
 
@@ -597,12 +605,12 @@ target/release new R8 map ID: d4b4cd746c84fb9df1c6e5274a6567ee1bbc29e3a3820dee0e
 не выдаются за успешное Android execution. Unsafe/protobuf warning появился и при
 host protocol tests на JDK25, но не вызвал отказ; зависимости/JDK ради него не менялись.
 
-Оставшиеся условия: пользователь обновляет ветку и запускает одну готовую команду
-из Windows-инструкции сначала на Honor15, затем на второй конфигурации, например
-эмуляторе17, сохраняя результаты каждого запуска до следующего (новый запуск удаляет
-старые отчёты). Нужны **семь реально завершённых PASS на каждом устройстве** и
-успех итогового gate. До этих результатов исправление runtime требует подтверждения,
-P1 не полностью принят, PR6 сохраняется Draft и не сливается.
+На момент этого исправления оставалось выполнить единую команду из Windows-инструкции
+на Honor15 и второй конфигурации, сохраняя результаты до следующего запуска
+(новый запуск удаляет старые отчёты). Требовались **семь реально завершённых PASS
+на каждом устройстве** и успех итогового gate. Эти условия закрыты пользовательскими
+прогонами после следующего исправления `a34bd5f`, описанными в конце отчёта.
+PR6 сохраняется Draft и не сливается.
 
 ## NoClassDefFoundError Trace: согласование target/test ABI
 
@@ -707,7 +715,7 @@ Prone runtime JAR с JDK-only enum. Никакие missing AndroidX/Kotlin runti
 Storage/ICU/CBOR по-прежнему вне optimization scope. Штатный release не получает
 generated instrumentation ABI и compiler-intrinsics rules. Поэтому p1Release теперь
 отличается от него не только install ID/signing/fallback/marker, но и этими требованиями
-внешнего consumer к сохранению API. Runtime PASS будет evidence данного обработанного
+внешнего consumer к сохранению API. Runtime PASS является evidence данного обработанного
 release-derived target; это не доказательство идентичного R8 результата обычного release.
 Startup provider/lifecycle не отключены; прежнее kotlin.collections package rule сохранено.
 
@@ -732,7 +740,9 @@ SDK37 APIs на Android15. Platform-owned methods не объявляются AP
 В существующий `@Before` P1 suite добавлены Trace class identity через target loader
 и реальные вызовы begin/end/forceEnable с фиксированной synthetic trace label.
 Новых test методов нет: ровно прежние семь, тот же production S1/codecs backend.
-Без Android runner фактическое разрешение этими loaders не объявляется проверенным.
+На этапе подготовки без Android runner фактическое разрешение этими loaders
+не объявлялось проверенным. Позднейшее пользовательское выполнение всех семи тестов
+подтверждает прохождение этого `@Before` на обеих Android-конфигурациях.
 
 Каждый audit сохраняет **оба** mappings, обе эффективные R8 configurations и generated
 ABI rules в `reports/p1-runtime/artifacts/<bundleId>/`. Bundle ID вычисляется из SHA256
@@ -752,7 +762,7 @@ Run manifest и успешный runtime summary теперь содержат b
 сохранена: требуются XML, completed statuses из protobuf и runner exit status.
 Host suite содержит33 проверки, включая binding/смену/отсутствие artifact identity.
 
-### Валидация и оставшиеся условия этого исправления
+### Валидация и условия runtime-подтверждения этого исправления
 
 Единая команда Windows **не меняется**:
 
@@ -763,8 +773,9 @@ Host suite содержит33 проверки, включая binding/смен�
 Нужны `runtime=PASS`, новый run ID, artifact bundle ID и **семь завершённых PASS
 на каждом устройстве**,0 failures/errors/skipped, BUILD SUCCESSFUL итоговой задачи.
 Ожидаемые имена методов и материалы при ошибке перечислены в Windows-инструкции.
-Последний Honor zero-test run не закрывает gate; второй подтверждённый Android
-runtime также остаётся обязательным. PR6 сохраняется Draft, без merge.
+Предшествующий Honor zero-test run не закрывает gate; он сохранён как сбой.
+Успешные повторные прогоны на Honor и эмуляторе после `a34bd5f` зафиксированы
+в следующем дополнении. PR6 сохраняется Draft, без merge.
 
 Реально выполненные финальные команды (с прежними JAVA_HOME/ANDROID_HOME/Gradle cache):
 
@@ -809,6 +820,64 @@ bundle ID:     2f3f534cb7a1f709953175c1b10b0f27a5f845a87e8591dee646c57d994e9f90
 
 Новые mappings не использованы для retrace старого Honor crash. Предупреждение
 Unsafe/protobuf не вызвало отказа host checks; JDK/зависимости ради него не менялись.
-После Pull пользователь запускает прежнюю единую команду, сохраняет отчёт Honor
-и диагностический ZIP вне build, затем повторяет на второй Android-конфигурации.
-До семи завершённых PASS на каждом устройстве runtime fix не подтверждён, P1 не принят полностью.
+Последующее подтверждение пользователя закрывает условия семи завершённых PASS
+на каждой из двух Android-конфигураций и успешной итоговой команды; подробности ниже.
+
+## Пользовательское подтверждение runtime после a34bd5f
+
+Перед этим обновлением локальная и удалённая ветки PR6 совпали:
+`a34bd5f45aea9d740abaecef659ca8470d37c822`. PR открыт, Draft, без merge.
+Изменён только этот отчёт; код, настройки сборки и нормативный Gradle9.6.0 не менялись.
+
+Пользователь подтвердил выполнение после этого исправления на **Windows с Gradle9.8.0**:
+
+```powershell
+.\gradlew.bat -Pp1ReleaseRuntime=true :app:p1ReleaseRuntimeCheck --console=plain
+```
+
+| Android-конфигурация | Переданный HTML-отчёт | Результат по подтверждению пользователя |
+| --- | --- | --- |
+| Физический Honor ABR-LX1, Android15 | `com.fantadrom.copperscroll.storage.runtime.P1BackendRuntimeTest - honor.html` | 7 passed,0 failures,0 skipped; итоговая команда BUILD SUCCESSFUL |
+| Эмулятор, Android17 | `com.fantadrom.copperscroll.storage.runtime.P1BackendRuntimeTest -virtual.html` | 7 passed,0 failures,0 skipped; итоговая команда BUILD SUCCESSFUL |
+
+В обоих отчётах, по подтверждению пользователя, выполнены ровно семь ожидаемых методов
+`com.fantadrom.copperscroll.storage.runtime.P1BackendRuntimeTest`:
+
+- `targetApkLoadsPinnedUnicode16Data`;
+- `unicode16CompositionAndEquivalentSecrets`;
+- `pinLeadingZerosAndRejectedRepertoire`;
+- `unsupportedBackendDoesNotFallBackToSystemNfc`;
+- `cborUnknownEnumsAndIndependentGolden`;
+- `rejectsNoncanonicalGolden`;
+- `all21SyntheticS1GoldenVectors`.
+
+Источник результата, сведений об устройствах, Windows/Gradle и успехе итоговой команды —
+сообщение пользователя с двумя HTML-вложениями. Инструмент загрузки вложений вернул
+`file download size mismatch`, поэтому агент не прочитал HTML независимо и не выполнял
+эти прогоны. BUILD SUCCESSFUL итоговой команды зафиксирован со слов пользователя,
+а не выведен из HTML. Локальные APK hashes/map IDs выше не приписываются этим прогонам.
+
+**Закрыты условия приёмки P1: Android S1/Unicode16 и CBOR runtime после R8,
+семь завершённых PASS с успешным p1ReleaseRuntimeCheck на каждом устройстве
+и матрица двух Android-конфигураций API31+.** Это новые успешные результаты после
+`a34bd5f`; прежние запуски с tests="0" и startup crashes остаются **НЕ PASS**.
+Ранее подтверждённый debug-тест Honor остаётся отдельным результатом; JVM conformance
+ICU4J76.1 и независимый unicodedata2 не подменяются этими Android smoke-прогонами.
+
+Результат относится к **p1Release**, обработанному R8, с прямыми вызовами production
+S1/codecs из target APK, без второй копии backend в test APK. Сохраняются ограничения:
+
+- Область optimization — `androidx.**`, `kotlin.**`, `kotlinx.**`; storage, ICU и CBOR
+  находятся вне неё. PASS подтверждает их исполнение из обработанного APK,
+  а не оптимизацию их собственного кода.
+- p1Release наследует release, но имеет suffix `.p1runtime`, локальную test signing,
+  fallback/marker и дополнительные instrumentation ABI / compiler-intrinsics keep rules.
+  Обычный release эти дополнительные rules не получает; результат не доказывает
+  побайтную идентичность или runtime PASS обычного release APK.
+- Пользовательская среда Gradle9.8.0 отличается от нормативного wrapper9.6.0.
+  Эти два Android-прогона не объявляются выполненными с Gradle9.6.0.
+- Закрытие указанных gates P1 не подтверждает Argon2/encryption/key management,
+  authentication, transactional writer, recovery/durability, SAF или UI integration
+  защищённого контейнера; эти работы находятся за пределами проверенного P1.
+
+PR6 сохраняется Draft; слияние не выполнялось.
