@@ -30,7 +30,16 @@ public final class VerifyRuntimeResults {
         "cborUnknownEnumsAndIndependentGolden", "rejectsNoncanonicalGolden", "all21SyntheticS1GoldenVectors");
     static String reportDirectory = "p1-runtime";
     static void configure(String profile) {
-        require(profile.equals("p2") || profile.equals("p2-benchmark"), "Unknown runtime profile");
+        require(profile.equals("p2") || profile.equals("p2-benchmark") || profile.equals("p3"), "Unknown runtime profile");
+        if(profile.equals("p3")) {
+            reportDirectory = "p3-runtime";
+            SUITE = "com.fantadrom.copperscroll.storage.runtime.P3TransactionRuntimeTest";
+            EXPECTED = Set.of("createAddMutateReopen", "commitUnknownReconciliationAndRevision",
+                "recoveryIsolationAndNoPasswordFallback", "lazyVerificationAndUnsupportedSchema",
+                "ownerRevokeAndClosingSave", "namespaceAndLocalStateDurability", "catalogueSplitsAndLimits",
+                "boundedStoreAndConflict");
+            return;
+        }
         reportDirectory = profile.equals("p2") ? "p2-runtime" : "p2-benchmark";
         SUITE = "com.fantadrom.copperscroll.storage.runtime." +
             (profile.equals("p2") ? "P2CryptoRuntimeTest" : "P2KdfBenchmark");

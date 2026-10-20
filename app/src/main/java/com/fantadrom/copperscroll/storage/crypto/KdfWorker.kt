@@ -6,10 +6,11 @@ import java.util.concurrent.ExecutionException
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 
-class CryptoCancellation {
+class CryptoCancellation internal constructor(private val stopRequested: () -> Boolean) {
+    constructor() : this({ false })
     private val cancelled = AtomicBoolean()
     fun cancel() { cancelled.set(true) }
-    internal fun check() { requireCrypto(!cancelled.get(), CryptoFailure.Cancelled) }
+    internal fun check() { requireCrypto(!cancelled.get() && !stopRequested(), CryptoFailure.Cancelled) }
 }
 
 internal fun interface ArgonDerivation { fun derive(secret: ByteArray, envelope: Envelope): ByteArray }
