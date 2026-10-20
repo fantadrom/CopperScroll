@@ -25,6 +25,10 @@ public final class VerifyRuntimeApks {
         "Lcom/fantadrom/copperscroll/storage/access/CredentialManager;",
         "Lcom/fantadrom/copperscroll/storage/crypto/ZoneKey;",
         "Lcom/fantadrom/copperscroll/storage/crypto/RecordCrypto;",
+        "Lcom/fantadrom/copperscroll/storage/transaction/TransactionCore;",
+        "Lcom/fantadrom/copperscroll/storage/io/ResourceOwner;", "Lcom/fantadrom/copperscroll/storage/io/FileChannelStore;",
+        "Lcom/fantadrom/copperscroll/storage/io/FaultStore;", "Lcom/fantadrom/copperscroll/storage/io/LocalStateCodec;",
+        "Lcom/fantadrom/copperscroll/storage/format/ContainerReader;", "Lcom/fantadrom/copperscroll/storage/format/CowCatalogue;",
         "Lorg/bouncycastle/crypto/generators/Argon2BytesGenerator;",
         "Lorg/bouncycastle/crypto/generators/Argon2BytesGenerator$BlockPool;",
         "Lorg/bouncycastle/crypto/generators/HKDFBytesGenerator;", "Lorg/bouncycastle/crypto/macs/HMac;",
@@ -70,11 +74,20 @@ public final class VerifyRuntimeApks {
                 require((testIndex.classes.get(p2Suite).methods.getOrDefault(method + "()V", 0) & 1) != 0,
                     "P2 expected runtime method missing from processed test APK: " + method);
             boolean benchmark = Path.of(args[6]).getFileName().toString().equals("p2-benchmark");
+            String p3Suite = "Lcom/fantadrom/copperscroll/storage/runtime/P3TransactionRuntimeTest;";
+            require(testClasses.contains(p3Suite) && !appClasses.contains(p3Suite), "P3 suite must belong to test APK only");
+            for(String method : List.of("createAddMutateReopen", "commitUnknownReconciliationAndRevision",
+                    "recoveryIsolationAndNoPasswordFallback", "lazyVerificationAndUnsupportedSchema", "ownerRevokeAndClosingSave",
+                    "namespaceAndLocalStateDurability", "catalogueSplitsAndLimits", "boundedStoreAndConflict"))
+                require((testIndex.classes.get(p3Suite).methods.getOrDefault(method+"()V",0) & 1) != 0,
+                    "P3 expected runtime method missing: " + method);
             require(testClasses.contains("Lcom/fantadrom/copperscroll/storage/runtime/P2KdfBenchmark;") == benchmark,
                 "KDF benchmark must be compiled only for the explicit benchmark profile");
             for (String name : testClasses) {
                 require(!name.startsWith("Lcom/fantadrom/copperscroll/storage/access/") &&
                     !name.startsWith("Lcom/fantadrom/copperscroll/storage/format/") &&
+                    !name.startsWith("Lcom/fantadrom/copperscroll/storage/io/") &&
+                    !name.startsWith("Lcom/fantadrom/copperscroll/storage/transaction/") &&
                     !name.startsWith("Lcom/fantadrom/copperscroll/storage/crypto/") && !name.startsWith("Lorg/bouncycastle/") &&
                     !name.startsWith("Lcom/ibm/icu/") && !name.startsWith("Lco/nstant/in/cbor/"),
                     "Instrumentation APK contains a second backend implementation");

@@ -192,7 +192,7 @@ object NoteCodec {
         checkFormat(total == payload.bodyBytes && total <= Limits.NOTE)
         val out = ByteArray(total.toInt()); var pos = 0
         chunks.forEach { it.copyInto(out,pos); pos += it.size }
-        return decode(out)
+        return try { decode(out) } finally { out.fill(0) }
     }
 }
 class ChunkListEntry(val ordinal: Long, val ref: LogicalRef)

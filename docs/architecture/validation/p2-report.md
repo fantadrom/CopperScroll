@@ -8,10 +8,40 @@ AGENTS.md в репозитории/родителях не найден. Про
 review-resolution1.1, p1-report и P1 codecs/S1/runtime tools. Эти нормативные документы
 не переопределяются реализацией; новые wire поля/версии не вводились.
 
-**Статус: P2 частично выполнен.** Реализован memory-only crypto слой и подготовлен
-воспроизводимый release-derived Android suite. Android execution и device KDF
-benchmarks агентом не выполнены; их PASS не следует из сборки или APK audit.
+**Статус: реализация P2 и пользовательские Android runtime-прогоны подтверждены;
+device KDF benchmarks остаются открытыми.** Реализован memory-only crypto слой.
+Android execution выполнен пользователем, не агентом; его PASS подтверждён
+приложенными runtime-result, отдельно от сборки и APK audit.
 Это не файловый движок, ChangeSecret commit и не production approval.
+
+### Пользовательские результаты после PR №7
+
+В задании P3 от 19 октября 2026 пользователь предоставил итоговые
+`p2-runtime-result.txt` и `p1-runtime-result.txt` для head P2
+`134dbbb0cee49d3623f40f557e6adf837c206e5e`. Оба содержат `runtime=PASS`,
+`variant=p1Release`, по два устройства и точные отдельные ожидаемые suite:
+
+| Suite | Honor ABR-LX1 / Android15 | Эмулятор / Android17 | runId |
+| --- | --- | --- | --- |
+| P2CryptoRuntimeTest |8 passed,0 failures/errors/skipped |8 passed,0 failures/errors/skipped |`c5e23190-c110-4e53-a8d5-03d8a81b379f` |
+| P1BackendRuntimeTest |7 passed,0 failures/errors/skipped |7 passed,0 failures/errors/skipped |`9b4a0d20-c17b-4023-9fee-405fcafa086d` |
+
+Проверена одна пара APK:
+
+```properties
+artifactBundleId=d7fec5127795aecc51acdfd4d164b34d7a03089d5d2964b6e8db2cdf5d8d1d1c
+targetSha256=70ddaf1d070215dc06c7f169f0b3293214532a17bac786dfd0aa107e5393c933
+testSha256=02117eed8f02416f19b763fc17c1b9ea968e58bddb59747d6e66856da1810179
+targetMapId=65a9b9b15f4099b68059e4913d3e863b385252d5eac4967e6da2839516d33fc6
+testMapId=4185c1c04c688d5db9effa97580d5bf06dc86ee2e0c4a0135b8e3f953209f5be
+```
+
+Это пользовательские прогоны release-derived target, не обычного production
+release и не выполнение агента. Версия Gradle в этих двух receipts не записана;
+нормативный wrapper репозитория остаётся 9.6.0. Даты/условия фактических запусков
+не выводятся из runId. Прежние ограничения R8/test-target ниже сохраняются.
+Новое ТЗ явно разрешает P3 на синтетических данных без ожидания device KDF
+benchmarks; оно заменяет прежний входной gate P3 в конце исторического отчёта.
 
 ## Зависимости и первичные источники
 
@@ -20,7 +50,8 @@ benchmarks агентом не выполнены; их PASS не следует
 Она доступна в Maven Central, POM не объявляет runtime transitive dependencies.
 BC — lightweight Argon2id/HKDF-SHA256/HMAC-SHA256; AES256/GCM/tag128 —
 `Cipher.getInstance("AES/GCM/NoPadding")` через JCA, без выбора/регистрации BC provider.
-На JVM KAT использует JCA хоста; Android JCA ещё требует device-подтверждения.
+На JVM KAT использует JCA хоста; Android JCA подтверждён пользовательским P2
+runtime-прогоном выше в пределах выбранного release-derived target.
 Java15to18 artifact выбран для legacy classfile/API совместимости, не как готовый
 сертификат Android. SDK37/min31, wrapper9.6.0, AGP9.4.1, Kotlin2.2.10 и Java11 сохранены.
 
@@ -161,8 +192,9 @@ byte exporter, pinned ICU/fixture/license assets и mappings обоих APK с S
 
 В этом окружении нет emulator executable/system image или /dev/kvm; локальный adb
 не смог создать `/home/agent/.android` в read-only home. Список подключённых устройств
-не получен. Honor пользователя вне среды агента. Runtime не объявляется пройденным.
-P1 пользовательские7 PASS на
+не получен. Honor пользователя вне среды агента. Агент Android runtime не запускал;
+пользовательское подтверждение P2/P1 после PR №7 записано в начале отчёта.
+Более ранние P1 пользовательские7 PASS на
 Honor15 и эмуляторе17 / Windows / Gradle9.8.0 относятся к head b510f0f, сохранены
 в p1-report и не являются собственным Android запуском агента или P2 PASS.
 
@@ -229,14 +261,16 @@ PSS не называется RSS; VmHWM не per-call peak. Benchmark method PA
 физические телефоны, thermal/low-memory/OOM остаются открытыми. Скорость эмулятора
 не основание выбора параметров телефона; универсальный creation profile не объявлен.
 
-Пользователю: [точная Windows-инструкция](../../../tools/p2/android-runtime-windows.md),
+Для повторения: [точная Windows-инструкция](../../../tools/p2/android-runtime-windows.md),
 одна команда `p2ReleaseRuntimeCheck` на Honor15 и эмуляторе17; затем P1 regression
-прежней командой. Нужны8 P2 PASS и7 P1 PASS на каждом выбранном устройстве,
-успех итоговых gates, сохранённые reports/diagnostic ZIP. Benchmarks запускаются
+прежней командой. Критерии —8 P2 PASS и7 P1 PASS на каждом выбранном устройстве,
+успех итоговых gates, сохранённые reports/diagnostic ZIP. Эти correctness-условия
+закрыты пользовательскими receipts выше. Benchmarks запускаются
 отдельно по [README](../../../tools/p2/README.md).
 
-Готовность к P3: crypto API/нормативные bytes пригодны для следующего JVM/fault-store
-этапа; полная приёмка P2 ожидает Android/release runtime и предусмотренные device
-проверки. Входной gate P3 не объявляется закрытым до приёмки P2.
+Готовность к P3: пользовательские P1/P2 runtime условия закрыты записью выше;
+новое задание разрешает JVM/fault-store этап на синтетических данных.
+Device KDF/profile/provider/security условия остаются открытыми.
 P3 не получает права real-data/SAF production записи по этому отчёту.
-PR создаётся без merge; открытые условия не скрываются за BUILD SUCCESSFUL.
+Исходный PR №7 слит пользователем в master `cbc4d44dd7928d753374503ee1eb566d528332b0`.
+Открытые device/KDF/provider условия не скрываются за BUILD SUCCESSFUL.

@@ -30,10 +30,11 @@ abstract class GenerateP1RuntimeApi : JavaExec() {
 // Opt-in instrumentation target; ordinary test selection and release signing stay unchanged.
 val p2KdfBenchmark = providers.gradleProperty("p2KdfBenchmark").orElse("false").get().toBooleanStrict()
 val p2ReleaseRuntime = providers.gradleProperty("p2ReleaseRuntime").orElse("false").get().toBooleanStrict()
-check(!(p2ReleaseRuntime && p2KdfBenchmark)) { "Select P2 correctness OR explicit benchmark" }
-val p1ReleaseRuntime = providers.gradleProperty("p1ReleaseRuntime").orElse("false").get().toBooleanStrict() || p2ReleaseRuntime || p2KdfBenchmark
-val cryptoRuntimeProfile = if (p2KdfBenchmark) "p2-benchmark" else if (p2ReleaseRuntime) "p2" else null
-val runtimeReports = if (p2KdfBenchmark) "p2-benchmark" else if (p2ReleaseRuntime) "p2-runtime" else "p1-runtime"
+val p3ReleaseRuntime = providers.gradleProperty("p3ReleaseRuntime").orElse("false").get().toBooleanStrict()
+check(listOf(p2ReleaseRuntime,p2KdfBenchmark,p3ReleaseRuntime).count { it } <= 1) { "Select one correctness suite OR explicit benchmark" }
+val p1ReleaseRuntime = providers.gradleProperty("p1ReleaseRuntime").orElse("false").get().toBooleanStrict() || p2ReleaseRuntime || p2KdfBenchmark || p3ReleaseRuntime
+val cryptoRuntimeProfile = if(p3ReleaseRuntime) "p3" else if (p2KdfBenchmark) "p2-benchmark" else if (p2ReleaseRuntime) "p2" else null
+val runtimeReports = if(p3ReleaseRuntime) "p3-runtime" else if (p2KdfBenchmark) "p2-benchmark" else if (p2ReleaseRuntime) "p2-runtime" else "p1-runtime"
 
 android {
     namespace = "com.fantadrom.copperscroll"
@@ -52,7 +53,7 @@ android {
         testInstrumentationRunnerArguments["p1ExpectedVariant"] = if (p1ReleaseRuntime) "p1Release" else "debug"
         if (p1ReleaseRuntime) {
             testInstrumentationRunnerArguments["class"] = "com.fantadrom.copperscroll.storage.runtime." +
-                if (p2KdfBenchmark) "P2KdfBenchmark" else if (p2ReleaseRuntime) "P2CryptoRuntimeTest" else "P1BackendRuntimeTest"
+                if(p3ReleaseRuntime) "P3TransactionRuntimeTest" else if (p2KdfBenchmark) "P2KdfBenchmark" else if (p2ReleaseRuntime) "P2CryptoRuntimeTest" else "P1BackendRuntimeTest"
         }
         if (p2KdfBenchmark) {
             for ((key, fallback) in mapOf("p2BenchmarkMemoryKiB" to "16384", "p2BenchmarkIterations" to "2",
@@ -133,7 +134,7 @@ val p1ResultProtocol = configurations.create("p1ResultProtocol") {
 dependencies.add(p1ResultProtocol.name, "com.android.tools.androidtest:test-result-proto:1.0.1")
 val compileP1ResultVerifier = tasks.register<JavaCompile>("compileP1ResultVerifier") {
     source(rootProject.file("tools/p1/VerifyRuntimeResults.java"), rootProject.file("tools/p1/VerifyRuntimeResultsTest.java"),
-        rootProject.file("tools/p2/VerifyP2RuntimeResultsTest.java"))
+        rootProject.file("tools/p2/VerifyP2RuntimeResultsTest.java"), rootProject.file("tools/p3/VerifyP3RuntimeResultsTest.java"))
     classpath = p1ResultProtocol
     destinationDirectory.set(layout.buildDirectory.dir("p1-result-verifier/classes"))
     options.release.set(11)
@@ -153,6 +154,13 @@ val testP2RuntimeResults = tasks.register<JavaExec>("testP2RuntimeResults") {
     mainClass.set("VerifyP2RuntimeResultsTest")
 }
 tasks.named("check") { dependsOn(testP2RuntimeResults) }
+val testP3RuntimeResults = tasks.register<JavaExec>("testP3RuntimeResults") {
+    group = "verification"
+    dependsOn(compileP1ResultVerifier)
+    classpath = files(compileP1ResultVerifier.flatMap { it.destinationDirectory }, p1ResultProtocol)
+    mainClass.set("VerifyP3RuntimeResultsTest")
+}
+tasks.named("check") { dependsOn(testP3RuntimeResults) }
 
 if (p1ReleaseRuntime) {
     // Error Prone annotations are compile-time metadata; IncompatibleModifiers references a JDK-only enum.
@@ -227,6 +235,7 @@ if (p1ReleaseRuntime) {
         description = "Discard previous P1 results and snapshot selected online devices for this invocation."
         dependsOn(verifyP1ReleaseApks, testP1RuntimeResults)
         if (cryptoRuntimeProfile != null) dependsOn(testP2RuntimeResults)
+        if (p3ReleaseRuntime) dependsOn(testP3RuntimeResults)
         classpath = files(compileP1ResultVerifier.flatMap { it.destinationDirectory }, p1ResultProtocol)
         mainClass.set("VerifyRuntimeResults")
         args("prepare", layout.buildDirectory.get().asFile.absolutePath,
@@ -238,7 +247,7 @@ if (p1ReleaseRuntime) {
         dependsOn(prepareP1RuntimeRun)
         outputs.upToDateWhen { false }
     }
-    tasks.register<JavaExec>(if (p2KdfBenchmark) "p2KdfBenchmarkCheck" else if (p2ReleaseRuntime) "p2ReleaseRuntimeCheck" else "p1ReleaseRuntimeCheck") {
+    tasks.register<JavaExec>(if(p3ReleaseRuntime) "p3ReleaseRuntimeCheck" else if (p2KdfBenchmark) "p2KdfBenchmarkCheck" else if (p2ReleaseRuntime) "p2ReleaseRuntimeCheck" else "p1ReleaseRuntimeCheck") {
         group = "verification"
         description = "Run fresh $runtimeReports processed-APK tests and enforce its exact suite on EVERY selected device."
         dependsOn(connectedP1)

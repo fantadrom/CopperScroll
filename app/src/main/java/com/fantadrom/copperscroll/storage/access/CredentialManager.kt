@@ -148,4 +148,30 @@ class CredentialManager internal constructor(entropy: Entropy, argon: ArgonDeriv
 
     private fun fingerprint(descriptor: Descriptor) = Bytes(MessageDigest.getInstance("SHA-256")
         .digest(DescriptorCodec.logicalBytes(descriptor) + descriptor.logicalMac.copy()))
+
+    /** Add-zone preparation only, after main current-secret verification. No file/IO/UI. */
+    fun prepareAdditionalZone(current: CurrentCredential, main: Descriptor, newZone: Bytes,
+                              newSecret: CanonicalSecret, repeated: CanonicalSecret, inputMethod: Int,
+                              parameters: KdfParameters = KdfParameters(),
+                              cancel: CryptoCancellation = CryptoCancellation()): PreparedZone {
+        requireCrypto(main.role == 1 && current.key.role == 1 && main.zoneId == current.key.zoneId)
+        requireCrypto(current.descriptorFingerprint == fingerprint(main), CryptoFailure.CorruptData)
+        validateIdentity(current.key.containerId,newZone,2)
+        requireCrypto(newZone != main.zoneId && inputMethod in 1..4); parameters.validate()
+        return KdfWorker.run(cancel) { submit -> current.withSecret {
+            val bytes = newSecret.copyBytes()
+            try {
+                val repeat = repeated.copyBytes()
+                try { requireCrypto(Arrays.constantTimeAreEqual(bytes,repeat),CryptoFailure.SecretMismatch) }
+                finally { repeat.fill(0) }
+                var opened: ZoneKey? = null
+                try { opened = envelopes.open(submit,Envelope.fromDescriptor(current.key.containerId,main),bytes) }
+                catch(e: CryptoException) { if(e.failure != CryptoFailure.CredentialMismatch) throw e }
+                opened?.use { throw CryptoException(CryptoFailure.AmbiguousCredential) }
+                val prepared = envelopes.create(submit,current.key.containerId,newZone,2,inputMethod,parameters,bytes)
+                try { submit.check(); current.consumeSecret(); prepared }
+                catch(e: Throwable) { prepared.close(); throw e }
+            } finally { bytes.fill(0) }
+        } }
+    }
 }

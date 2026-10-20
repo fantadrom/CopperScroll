@@ -70,6 +70,8 @@ object DescriptorCodec {
 class Superblock(val generation: Long, val committedLength: Long, val containerId: Bytes,
                  val instanceId: Bytes, val zones: List<Descriptor>)
 class HeaderSelection(val header: Superblock, val selectedSlot: Int, val checksumValidSlots: List<Boolean>)
+class SuperblockFrame(val generation: Long, val committedLength: Long, val containerId: Bytes,
+                      val instanceId: Bytes, val zoneCount: Int, val bytes: Bytes)
 internal fun le(bytes: ByteArray): ByteBuffer = ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN)
 internal fun zero(bytes: ByteArray, from: Int, until: Int) { checkFormat((from until until).all { bytes[it] == 0.toByte() }) }
 internal fun magic(bytes: ByteArray, text: String) { checkFormat(bytes.size >= 8 && bytes.copyOfRange(0, 8).contentEquals(text.toByteArray(Charsets.US_ASCII))) }
@@ -84,6 +86,24 @@ object SuperblockCodec {
         checkFormat(fileSize in 131072..Limits.FILE_MAX, Failure.UnsupportedLimit)
         checkFormat(x.getLong(24) in 131072..fileSize, Failure.CorruptHeader)
         return x
+    }
+    /** Common framing for explicit recovery; deliberately does not parse the other descriptor. */
+    fun recoveryFrame(bytes: ByteArray, fileSize: Long): SuperblockFrame {
+        checkFormat(hashValid(bytes), Failure.CorruptHeader)
+        val x = framing(bytes, fileSize)
+        val count = bytes[64].toInt(); checkFormat(count in 1..2)
+        zero(bytes,65,72); zero(bytes,8264,65504)
+        if(count == 1) zero(bytes,4168,8264)
+        return SuperblockFrame(x.getLong(16), x.getLong(24), Bytes(bytes.copyOfRange(32,48)).id(16),
+            Bytes(bytes.copyOfRange(48,64)).id(16), count, Bytes(bytes))
+    }
+    fun recoveryDescriptor(frame: SuperblockFrame, role: Int): Descriptor {
+        checkFormat(role in 1..frame.zoneCount)
+        val b = frame.bytes.copy(); val start = 72 + (role-1)*4096
+        val n = le(b).getInt(start).toLong() and 0xffffffffL
+        checkFormat(n in 1..4092); zero(b,start+4+n.toInt(),start+4096)
+        return DescriptorCodec.decode(b.copyOfRange(start+4,start+4+n.toInt()),frame.committedLength)
+            .also { checkFormat(it.role == role) }
     }
     fun decode(bytes: ByteArray, fileSize: Long): Superblock {
         checkFormat(hashValid(bytes), Failure.CorruptHeader)
