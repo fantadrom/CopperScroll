@@ -10,6 +10,12 @@ tree `b8cdcfe563acc05df20b36f868be0a0933bdea78`, пользовательски�
 transaction/recovery/runtime tools и доступная концепция редакции20.10.2026
 14:29:08 UTC. Google Doc не изменён; AGENTS.md в репозитории/родителях не найден.
 
+Коммит реализации: [`287edb035f9a84759c831a7efb996dbdc7317743`](https://github.com/fantadrom/CopperScroll/commit/287edb035f9a84759c831a7efb996dbdc7317743),
+tree `cd540cce941887d5898868e0395f8ec81e5f4ba2`.
+Публикация: [Draft PR №9](https://github.com/fantadrom/CopperScroll/pull/9),
+base master; PR не слит. Последующий коммит добавляет только эту ссылку/SHA в
+отчёт; проверенные code/build/test inputs коммита реализации не меняет.
+
 **Статус: реализация и проверки агента описаны ниже; Android P4 runtime=NOT_RUN.
 Этап частично выполнен, Draft до пользовательских Honor15/эмулятор17 PASS.**
 Это synthetic headless backend, не production readiness приложения.
