@@ -68,10 +68,10 @@ object DescriptorCodec {
     fun logicalBytes(value: Descriptor): ByteArray = StrictCbor.encode(value.logicalFields(), 4092)
 }
 class Superblock(val generation: Long, val committedLength: Long, val containerId: Bytes,
-                 val instanceId: Bytes, val zones: List<Descriptor>)
+                 val instanceId: Bytes, val zones: List<Descriptor>, val minor: Int = 1)
 class HeaderSelection(val header: Superblock, val selectedSlot: Int, val checksumValidSlots: List<Boolean>)
 class SuperblockFrame(val generation: Long, val committedLength: Long, val containerId: Bytes,
-                      val instanceId: Bytes, val zoneCount: Int, val bytes: Bytes)
+                      val instanceId: Bytes, val zoneCount: Int, val bytes: Bytes, val minor: Int = 1)
 internal fun le(bytes: ByteArray): ByteBuffer = ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN)
 internal fun zero(bytes: ByteArray, from: Int, until: Int) { checkFormat((from until until).all { bytes[it] == 0.toByte() }) }
 internal fun magic(bytes: ByteArray, text: String) { checkFormat(bytes.size >= 8 && bytes.copyOfRange(0, 8).contentEquals(text.toByteArray(Charsets.US_ASCII))) }
@@ -81,7 +81,7 @@ object SuperblockCodec {
         checkFormat(b.size == Limits.HEADER, Failure.CorruptHeader)
         magic(b, "CSCRL001")
         val x = le(b)
-        checkFormat(x.getShort(8).toInt() == 1 && x.getShort(10).toInt() == 1 && x.getInt(12) == 0, Failure.UnsupportedVersion)
+        checkFormat(x.getShort(8).toInt() == 1 && x.getShort(10).toInt() in 1..2 && x.getInt(12) == 0, Failure.UnsupportedVersion)
         checkFormat(x.getLong(16) > 0, Failure.CorruptHeader)
         checkFormat(fileSize in 131072..Limits.FILE_MAX, Failure.UnsupportedLimit)
         checkFormat(x.getLong(24) in 131072..fileSize, Failure.CorruptHeader)
@@ -95,7 +95,7 @@ object SuperblockCodec {
         zero(bytes,65,72); zero(bytes,8264,65504)
         if(count == 1) zero(bytes,4168,8264)
         return SuperblockFrame(x.getLong(16), x.getLong(24), Bytes(bytes.copyOfRange(32,48)).id(16),
-            Bytes(bytes.copyOfRange(48,64)).id(16), count, Bytes(bytes))
+            Bytes(bytes.copyOfRange(48,64)).id(16), count, Bytes(bytes),x.getShort(10).toInt())
     }
     fun recoveryDescriptor(frame: SuperblockFrame, role: Int): Descriptor {
         checkFormat(role in 1..frame.zoneCount)
@@ -120,12 +120,13 @@ object SuperblockCodec {
         }
         if (count == 1) zero(bytes, 4168, 8264)
         checkFormat(zones.map { it.zoneId }.distinct().size == count)
-        return Superblock(x.getLong(16), length, Bytes(bytes.copyOfRange(32, 48)).id(16), Bytes(bytes.copyOfRange(48, 64)).id(16), zones)
+        return Superblock(x.getLong(16), length, Bytes(bytes.copyOfRange(32, 48)).id(16), Bytes(bytes.copyOfRange(48, 64)).id(16), zones,x.getShort(10).toInt())
     }
     fun encode(value: Superblock): ByteArray {
         checkFormat(value.zones.size in 1..2)
         val b = ByteArray(Limits.HEADER); val x = le(b)
-        x.put("CSCRL001".toByteArray(Charsets.US_ASCII)); x.putShort(1); x.putShort(1); x.putInt(0)
+        checkFormat(value.minor in 1..2,Failure.UnsupportedVersion)
+        x.put("CSCRL001".toByteArray(Charsets.US_ASCII)); x.putShort(1); x.putShort(value.minor.toShort()); x.putInt(0)
         x.putLong(value.generation); x.putLong(value.committedLength)
         x.put(value.containerId.sized(16).copy()); x.put(value.instanceId.sized(16).copy()); x.put(value.zones.size.toByte())
         value.zones.forEachIndexed { i, zone ->
@@ -143,6 +144,7 @@ object SuperblockCodec {
         val valid = slots.indices.filter { good[it] }
         valid.forEach { framing(slots[it], fileSize) } // Unknown checksum-valid framing blocks fallback.
         if (valid.size == 2) {
+            checkFormat(le(a).getShort(10) == le(b).getShort(10),Failure.UnsupportedVersion)
             checkFormat(a.copyOfRange(32,64).contentEquals(b.copyOfRange(32,64)), Failure.CorruptHeader)
             if (le(a).getLong(16) == le(b).getLong(16)) checkFormat(a.contentEquals(b), Failure.CorruptHeader)
         }

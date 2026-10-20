@@ -30,7 +30,13 @@ public final class VerifyRuntimeResults {
         "cborUnknownEnumsAndIndependentGolden", "rejectsNoncanonicalGolden", "all21SyntheticS1GoldenVectors");
     static String reportDirectory = "p1-runtime";
     static void configure(String profile) {
-        require(profile.equals("p2") || profile.equals("p2-benchmark") || profile.equals("p3"), "Unknown runtime profile");
+        require(profile.equals("p2") || profile.equals("p2-benchmark") || profile.equals("p3") || profile.equals("p4"), "Unknown runtime profile");
+        if(profile.equals("p4")) {
+            reportDirectory="p4-runtime"; SUITE="com.fantadrom.copperscroll.storage.runtime.P4VfsCardRuntimeTest";
+            EXPECTED=Set.of("vfsBatchDepthTrash","noteRichTextRevision","cardFieldRoundTripAndGolden","cardAtomicSaveAndDraft",
+                "masksDatesAndConstraints","templatesAndGlobalMessagePolicy","mediaStreamingAndCow","faultCommitUnknownAndRevoke",
+                "compatibilityRecoveryAndBudgets","sortingSettingsAndZoneIsolation"); return;
+        }
         if(profile.equals("p3")) {
             reportDirectory = "p3-runtime";
             SUITE = "com.fantadrom.copperscroll.storage.runtime.P3TransactionRuntimeTest";
@@ -70,6 +76,7 @@ public final class VerifyRuntimeResults {
     static void prepare(Path build, String adb) throws Exception {
         // This task is unconditionally executed BEFORE connected, never a cached input/output check.
         clearPreviousResults(build);
+        if(reportDirectory.equals("p4-runtime")) RuntimeSourceIdentity.verify(build.getParent().getParent(),sourceIdentity(build));
         Map<String, String> devices = snapshot(adb, System.getenv("ANDROID_SERIAL"));
         saveManifest(manifest(build), devices);
         bindArtifacts(build);
@@ -78,6 +85,11 @@ public final class VerifyRuntimeResults {
 
     private static final List<String> ARTIFACT_FIELDS = List.of("artifactBundleId", "targetSha256", "testSha256",
         "targetMapId", "testMapId", "targetMappingSha256", "testMappingSha256");
+    private static Path sourceIdentity(Path build) { return build.resolve("reports/p4-runtime/build-identity.properties"); }
+    private static String sourceIdentityHash(Path build) throws Exception {
+        byte[] hash=java.security.MessageDigest.getInstance("SHA-256").digest(Files.readAllBytes(sourceIdentity(build)));
+        StringBuilder b=new StringBuilder(); for(byte x:hash) b.append(String.format("%02x",x&255)); return b.toString();
+    }
     private static Properties readProperties(Path path) throws IOException {
         Properties properties = new Properties();
         try (InputStream in = Files.newInputStream(path)) { properties.load(in); }
@@ -91,6 +103,11 @@ public final class VerifyRuntimeResults {
             String value = artifacts.getProperty(field, ""); require(!value.isBlank(), "Missing artifact identity: " + field);
             run.setProperty(field, value);
         }
+        if(reportDirectory.equals("p4-runtime")) {
+            Properties identity=RuntimeSourceIdentity.read(sourceIdentity(build));
+            for(String field:RuntimeSourceIdentity.FIELDS) run.setProperty(field,identity.getProperty(field));
+            run.setProperty("sourceIdentitySha256",sourceIdentityHash(build));
+        }
         try (OutputStream out = Files.newOutputStream(manifest(build))) { run.store(out, "Fresh run bound to both processed APKs and mappings"); }
     }
     static void verifyArtifactBinding(Path build) throws Exception {
@@ -99,6 +116,12 @@ public final class VerifyRuntimeResults {
         require(artifacts.getProperty("mappingMarkers", "").equals("PASS"), "APK/mapping diagnostic mismatch");
         for (String field : ARTIFACT_FIELDS) require(!run.getProperty(field, "").isBlank() &&
             run.getProperty(field).equals(artifacts.getProperty(field)), "Artifacts changed during runtime run: " + field);
+        if(reportDirectory.equals("p4-runtime")) {
+            RuntimeSourceIdentity.verify(build.getParent().getParent(),sourceIdentity(build));
+            Properties identity=RuntimeSourceIdentity.read(sourceIdentity(build));
+            for(String field:RuntimeSourceIdentity.FIELDS) require(identity.getProperty(field).equals(run.getProperty(field)),"Source identity changed: "+field);
+            require(sourceIdentityHash(build).equals(run.getProperty("sourceIdentitySha256")),"Source provenance changed during runtime");
+        }
     }
 
     static void clearPreviousResults(Path build) throws IOException {
@@ -228,6 +251,14 @@ public final class VerifyRuntimeResults {
             .append(run.getProperty("runId")).append("\n");
         for (String field : ARTIFACT_FIELDS) if (run.containsKey(field))
             summary.append(field).append('=').append(run.getProperty(field)).append('\n');
+        if(reportDirectory.equals("p4-runtime")) {
+            for(String field:RuntimeSourceIdentity.FIELDS) {
+                require(!run.getProperty(field,"").isBlank(),"Missing build/source provenance: "+field);
+                summary.append(field).append('=').append(run.getProperty(field)).append('\n');
+            }
+            require(run.getProperty("sourceIdentitySha256","").matches("[0-9a-f]{64}"),"Missing source provenance hash");
+            summary.append("sourceIdentitySha256=").append(run.getProperty("sourceIdentitySha256")).append('\n');
+        }
         for (var device : found.entrySet()) {
             require(device.getValue().equals(EXPECTED), "Incomplete runtime suite on " + device.getKey() +
                 ": expected " + EXPECTED.size() + ", found " + device.getValue().size());

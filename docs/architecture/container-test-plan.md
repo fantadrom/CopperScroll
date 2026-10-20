@@ -5,6 +5,24 @@
 контейнера. Нормативные ожидания заданы [форматом](container-format-v1.md)
 и [протоколом T](container-design.md#5-единая-транзакция-записи-t).
 
+Актуальная P4 норма: [карточки и1.2](container-p4-extension.md). Базовые1.1 IDs
+сохраняются; новая матрица расширения отдельно от исторических R/C.
+
+## P4: отдельные проверки расширения
+
+| ID / приоритет | Сценарий | Ожидание |
+| --- | --- | --- |
+| CARD-01 P0 | Все10 field types, empty/default/Unicode/decimal/date/pattern | Точные values, limits и независимые CBOR goldens |
+| CARD-02 P0 | Field rename/reorder/add/delete/type change, caller mutations | Stable IDs, immutable snapshots, type change отвергнут, вся card одна T |
+| CARD-03 P0 | Invalid/warning/draft/last-valid/ACK N vs N+1/revoke/Unknown | Нет partial save/false Saved/late open, прежняя card цела |
+| CARD-04 P0 |1.1/1.2/unknown object/card/field/version, corrupt own/foreign graph | Нет silent migration/empty replacement, VerifyAll/recovery учитывают card refs |
+| CARD-05 P1 | Card body больше16KiB,4MiB/256fields/строки/precision budgets | Chunked roundtrip, bounded отказ до огромных allocations |
+| MASK-01 P0 | Format/copy/paste/delete/constraints и несовместимая смена | Raw отдельно, paste truncation без warning, иная потеря запрещена |
+| MASK-02 P0 | Calendar date/mask/year2000/leap/yy/yyyy/parser bounds | Полная date сохранна, null не заполняется показом, unknown reject |
+| TEMPLATE-01 P0 | Empty/bank instantiate, definition changes | Самостоятельная копия, defaults/field IDs, user-template false |
+| TEMPLATE-02 P1 | Global dismiss/reset, иной message/zone/container | Только один warning ID, без content/zone IDs в prefs, zone settings прежние |
+| CARD-06 P0 | VFS/note/card/batch/media fault matrix и randomized oracle | Whole old/new либо честный Unknown; чужая зона/ciphertext неизменны |
+
 ## 1. Стенд и критерий приёмки
 
 Два слоя: чистый JVM codec/engine на RandomAccessStore с fault injection и
@@ -227,7 +245,7 @@ VFS validation на лимитах и установить UX progress/cancellat
 device/security gates и ссылки на артефакты. Не подменять device-тест JVM-моделью
 и не утверждать физическое стирание флеш-данных по результатам compact.
 
-## 7. Граница фактически выполненного
+## 7. Историческая граница docs-only согласования
 
 Эта матрица — будущие испытания; ни один ID движка/device здесь не объявлен
 пройденным в docs-only согласовании. Сейчас выполнены только малые static

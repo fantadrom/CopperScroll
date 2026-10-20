@@ -1,10 +1,12 @@
 # Copper Scroll: поэтапные задания на прототип контейнера1.1
 
-Статус: согласованные отдельные задания, реализация не начата. Основа:
+Статус: P1…P3 приняты; P4 расширяет нормы [карточками/1.2](container-p4-extension.md).
+Ниже базовая последовательность этапов; P4 extension определяет актуальный scope. Основа:
 [design](container-design.md), [формат1.1](container-format-v1.md),
 [матрица проверок](container-test-plan.md), [решения R/C](container-review-resolution.md).
 Сохранить minSdk31/SDK37/AGP9.4.1/Gradle9.6.0/Java11 и текущую модель редактора.
-Этот этап меняет документацию/малые fixtures, не app/manifest/dependencies.
+Исторический docs-only этап менял документацию/малые fixtures; P4 включает app core,
+но не рабочий UI/manifest/dependencies.
 
 ## 1. Организация работы
 
@@ -102,11 +104,13 @@ RecoverZoneReadOnly по своему MAC/каталогу и common framing, н
 двух writers, owner closes ровно раз. Полные VFS/media ветви этих ID допроверяются после P4/P5, device gates до P6.
 Проекции тестов перечислить в отчёте этапа, не помечать весь ID выполненным по части.
 
-## 6. P4 — VFS, редакторный codec и streaming attachments
+## 6. P4 — VFS, карточки, редакторный codec и streaming attachments
 
 **Вход:** P3, bounded parser/crypto/T. UI ещё session-only.
 
-**Задача:** encrypted COW objects/children, stable ID/root/trash/depth63, batch
+**Задача:** сначала спецификация1.2/card schema и fixtures без потери1.1, затем
+headless card fields/masks/date/draft/templates/message policy по расширению.
+Encrypted COW objects/children, stable ID/root/trash/depth63, batch
 normalization/restore overflow, settings/counters/raw enums/icons. StorageNoteDTO
 сохраняет nullable todo, ordered overlapping styles/UTF-16, empty/title/cursor/dates.
 Synthetic binary chunks/chunk lists streaming, без Base64. Unknown schema не пустой root.

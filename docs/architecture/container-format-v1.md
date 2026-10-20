@@ -1,8 +1,11 @@
-# Copper Scroll: формат контейнера 1.1
+# Copper Scroll: формат контейнера 1.1 и расширение 1.2
 
 Статус: согласованная нормативная спецификация прототипа, редакция 2 от 18 октября 2026.
-Текущая wire-версия: containerMajor=1, containerMinor=1; envelope/record/zone/note=1.
-Движок и пользовательские файлы в репозитории отсутствуют. Прежний draft 1.0
+Поддержаны containerMajor=1, containerMinor=1 и явный minor2 для карточек.
+Норма расширения: [P4](container-p4-extension.md); она имеет приоритет над
+ограничениями reader1.1 ниже. Envelope/record/zone/note=1 сохраняются.
+Есть синтетический движок P1…P4 (P4 до device runtime — Draft);
+пользовательские файлы не используются. Прежний draft 1.0
 с неоднозначными S1/folder/enums не является второй допустимой спецификацией 1.1.
 Reader этой редакции не пишет в draft1.0 и не угадывает его правила; допускается
 только явное побайтовое копирование без заявления о проверке содержимого.
@@ -72,6 +75,9 @@ committedLength … EOF   незавершённый хвост/gaps, не ча�
 диапазоны обоих catalogue; может включать gaps и старые недостижимые records.
 
 ### 2.1. Superblock, каждый slot
+
+Таблица показывает базовые значения1.1; для нового1.2 меняется только minor по
+offset10 на2, как определено P4. Все offsets/sizes/reserved прежние.
 
 | Byte offset внутри slot | Size | Поле |
 | --- | --- | --- |
@@ -622,7 +628,9 @@ C≥S допустим, source/backup не удаляются автоматич
 containerMajor/minor1.1 определяют эту нормативную упаковку; zoneSchemaVersion
 и noteFormatVersion независимы. Version приложения их не меняет. Известны только
 requiredFeatures=0, envelope1/S1, record1, zone1/object1/settings1/note1/media1.
-Reader этой редакции поддерживает строго container1.1. Неизвестные minor/major
+Базовый reader1.1 поддерживал строго container1.1; P4 явно добавляет minor2 и
+objectSchema2/type6/card1 по [расширению](container-p4-extension.md), без миграции1.1.
+Неизвестные остальные minor/major
 или required bits запрещают writer **всего файла**, без автоматического отката
 к старому writable slot; допустимы отказ или явная точная opaque copy.
 
