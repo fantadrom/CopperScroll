@@ -12,19 +12,60 @@ transaction/recovery/runtime tools и доступная концепция ре
 
 Коммит реализации: [`287edb035f9a84759c831a7efb996dbdc7317743`](https://github.com/fantadrom/CopperScroll/commit/287edb035f9a84759c831a7efb996dbdc7317743),
 tree `cd540cce941887d5898868e0395f8ec81e5f4ba2`.
-Публикация: [Draft PR №9](https://github.com/fantadrom/CopperScroll/pull/9),
-base master; PR не слит. Публикационный коммит `968faec8` добавил только ссылку/SHA
+Первоначальная публикация: [PR №9](https://github.com/fantadrom/CopperScroll/pull/9)
+с base master, тогда Draft без merge. Публикационный коммит `968faec8` добавил только ссылку/SHA
 в отчёт. Последующее исправление Windows host gate описано в конце отчёта;
 исторические результаты исходной APK пары ниже сохранены отдельно.
 
-**Статус: реализация и проверки агента описаны ниже; Android P4 runtime=NOT_RUN.
-Этап частично выполнен, Draft до пользовательских Honor15/эмулятор17 PASS.**
+**Статус на21 октября2026: пользовательский P4 Android runtime подтверждён
+итоговым receipt ниже; device-условия приёмки P4 закрыты. PR №9 слит пользователем.**
 Это synthetic headless backend, не production readiness приложения.
 Пользовательский receipt P3 принят отдельно в [p3-report.md](p3-report.md):
 runId `619c964b-c0fb-4a8a-80d6-82f8a546bc8c`, bundle
 `f0084b2b3de360594ec7073b6644cded298524fa88162682ea163bdd589ccabe`, по8 PASS,
 failures/errors/skipped=0. Это предоставленный итоговый receipt, не запуск агента,
 не повторная проверка XML; версия Gradle того прогона не подтверждена.
+
+## Пользовательское подтверждение P4
+
+Предоставлен итоговый `runtime-result.txt`, SHA256
+`79de9dd9c28eb9686acc598d17a5815cc55393203d8ef4b78e1692bb804ce949`.
+`runtime=PASS`, variant=p1Release, suite=P4VfsCardRuntimeTest, runId
+`8c35290f-917b-42dd-872e-cc301f8ff4d2`: на двух устройствах по10 tests,
+failures/errors/skipped=0. По контексту задания это Honor ABR-LX1/Android15 и
+эмулятор Android17; receipt сам содержит serial IDs, без модели/API/ОС хоста.
+Это пользовательский запуск, не запуск агента и не повторная проверка XML/protobuf.
+
+```properties
+artifactBundleId=640126dd4b7e4309f0672d629e8fa40350ef4156edf17b171bbf59245b4336d9
+targetSha256=03f335fd99d428382cbc97a9b912843ebf0453c4f33ee99d4bdeeeb3fb1292cc
+testSha256=39a2b2860dc07ffb8684d2efd73d46667772b3ee048c3ea452aed9255f496e80
+targetMapId=11a095cb1b70a9583c0229dd8e0e97b1631c416213bc9cb8ca77d3dcd0cd80d7
+testMapId=93800a52c4888ec49e15013a7bfb713a2d9b7586d220bcdab5e311bc5eceea51
+targetMappingSha256=b0e252383a1054d496cda7e34e3f91023760b7a75bda7666d3ff5ab13ed49515
+testMappingSha256=6f4ff44e492767c4d2ca6c3fde4b7b8cfe21944bb8895d835ed834d8ae49dc36
+gradleVersion=9.6.0
+gradleJvmRuntime=25.0.3+-15898627-b508.16
+gradleJvmVendor=JetBrains s.r.o.
+sourceRevision=ff4981f05647cbded261dff872ac0ad674c6c1df
+sourceFingerprint=db5c322916cba494ea9e99c95353b8218a8dc098652aaf537c773712e3ecb23a
+sourceDirty=true
+sourceCodeDirty=false
+workingTreeDirty=true
+wrapperModified=true
+wrapperPropertiesSha256=92a95cec0ec5140cfd6148c544d8f10ba54729ffdc792803b4bc8ad4e840b00f
+wrapperJarSha256=76805e32c009c0cf0dd5d206bddc9fb22ea42e84db904b764f3047de095493f3
+sourceIdentitySha256=980da82563a1df256cc40c159021d4bab11078da0ddcf6cc982fa610a1838ef0
+```
+
+Source code отмечен clean, wrapper — локально modified: receipt не выдаётся за
+прогон неизменённого checkout. Фактическая версия Gradle9.6.0, не предполагаемая9.8.
+Репозиторный wrapper/его SHA не меняются. Ограничения p1Release относительно
+обычного release сохраняются; это не SAF/power-loss/KDF/security acceptance.
+GitHub подтвердил пользовательский merge PR №9 (`5a268ef26e03878f4c9c02e482ef6611d0766769`)
+и master `aa739e5145baac8d148bc0b5f0739dcd090705bb` с исходными картинками новой задачи.
+Все NOT_RUN/Draft/неподтверждённый Windows ниже — историческое состояние до этого
+receipt. Новая icons demo имеет отдельный UI smoke gate и не относится к P5/P6.
 
 ## Реализация и совместимость
 

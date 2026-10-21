@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application>
+        <activity
+            android:name="com.fantadrom.copperscroll.demo.IconComparisonActivity"
+            android:exported="true"
+            android:label="@string/icon_demo_title" />
+    </application>
+</manifest>
