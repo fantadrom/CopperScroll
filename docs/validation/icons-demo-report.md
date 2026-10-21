@@ -9,6 +9,12 @@
 Изучены MainActivity, WorkspaceUi, CopperScrollTheme, build config и README/manifest
 исходных изображений. Новая задача не относится к P5/P6.
 
+Коммит реализации: [`478bd00eeac387ae37f2e30e177ee96e1fe5919b`](https://github.com/fantadrom/CopperScroll/commit/478bd00eeac387ae37f2e30e177ee96e1fe5919b),
+tree `bb18cebdbac0514e661c113f635d1b7bb732886b`.
+[Отдельный Draft PR №10](https://github.com/fantadrom/CopperScroll/pull/10)
+с base master, без merge. Последующий коммит добавляет только ссылку/SHA в этот
+отчёт; проверенные app code/resources не меняет.
+
 Пользовательский P4 receipt внесён отдельно в
 [p4-report.md](../architecture/validation/p4-report.md): runId
 `8c35290f-917b-42dd-872e-cc301f8ff4d2`, по10 PASS на двух устройствах,
