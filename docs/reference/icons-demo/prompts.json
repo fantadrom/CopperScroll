@@ -1,0 +1,38 @@
+[
+  {
+    "key": "bank-simple",
+    "prompt": "Use case: stylized-concept. Asset type: ONE standalone square Android file icon for Copper Scroll. Subject: a single GREEN BANK PAYMENT CARD viewed almost straight on with a very slight three-quarter perspective, rounded corners, small gold chip upper left, four understated groups of embossed marks. This is the SIMPLIFIED member of a six-icon comparison set. Style: clean colorful softly dimensional illustrated desktop icon, restrained bevels, soft upper-left light, crisp silhouette, satin material, deep green with subtle teal edge, no outline, transparent backdrop, no background tile, no ground shadow. Simplified detail level: broad smooth surfaces, chip has just a few clear segments, no tiny writing, only four short groups of generic pale marks; no digits, personal data, brand, logo, contactless symbol or lettering. Composition: exactly one card centered, occupies about 84% of canvas width, generous consistent transparent margins, whole object visible, no cropping. Must remain recognizable at 48–60 dp. Output one square high-quality PNG image with a genuine alpha transparent background, not a checkerboard. No caption, labels, border, watermark, UI mockup, sprite sheet, or second card.",
+    "mode": "built-in image generation",
+    "reference": null
+  },
+  {
+    "key": "bank-detailed",
+    "prompt": "Use case: precise-object-edit. Create a DETAILED comparison variant of this exact standalone green bank card icon. Preserve the square canvas dimensions, genuine transparent alpha background, exact card silhouette, position, scale, perspective, green/gold palette, lighting direction, and chip/embossed-mark layout. Change only surface detail: add finely etched circuit contact divisions inside the gold chip, subtle fine green guilloche security waves in the smooth green areas, restrained satin microtexture, fine double edge bevel, and a few small generic microprint-like lines along the lower face. Keep the existing four groups of generic account marks rather than real card details. Richer detail should be clearly noticeable in the master image yet remain tasteful. Do not add objects, brands, logos, people, captions, background panels, a floor, cast shadow, checkerboard, or watermark. Output a new separate square PNG with actual transparent background. This is the detailed member of a matched simple/detailed Android icon pair.",
+    "mode": "built-in image generation",
+    "reference": "bank-simple"
+  },
+  {
+    "key": "passport-simple",
+    "prompt": "Use case: stylized-concept. Asset type: ONE standalone square Android file icon, matching a clean colorful softly dimensional illustrated desktop icon set for Copper Scroll. Subject: ONE CLOSED DARK BURGUNDY RED PASSPORT BOOKLET, upright portrait orientation, almost straight on with slight three-quarter view, front cover dominant, narrow visible spine at left, small gold abstract globe emblem at upper center and exact word PASSPORT below in gold. SIMPLIFIED detail variant. Broad smooth satin cover, restrained beveled edges, minimal seams, no tiny ornaments or fine texture, strong clean readable silhouette, soft upper-left illumination. Whole booklet centered occupying about 84 percent of canvas height, transparent margins on every side. Gold globe uses few broad lines and abstract continental shapes. This must remain recognizable at 48–60 dp. No country name, national emblem, stars, badges, extra objects, second passport, scene, caption, watermark, background panel, ground plane or drop shadow. Square PNG with genuine alpha transparent background, no checkerboard.",
+    "mode": "built-in image generation",
+    "reference": null
+  },
+  {
+    "key": "passport-detailed",
+    "prompt": "Use case: precise-object-edit. Create a DETAILED comparison variant of this exact burgundy passport icon. Preserve square canvas, genuine transparent background, precise booklet silhouette/position/scale/perspective, burgundy/gold palette, top-left lighting, exact word PASSPORT, and main gold globe emblem. Add detail only: fine realistic leather grain, delicate embossed double gold border inset from the cover edges, narrow ornamental corner flourishes within this border, finer gold engraving and latitude/longitude lines inside the existing globe, tiny page-edge lines and precise spine stitching. Maintain clean readable large forms; this should visibly contrast with the simplified original but belong to the same softly dimensional illustrated icon family. Do not introduce country names, real national emblems, flags, additional text, other objects, background, floor, drop shadow, checkerboard, captions or watermark. Output one new separate square alpha-transparent PNG.",
+    "mode": "built-in image generation",
+    "reference": "passport-simple"
+  },
+  {
+    "key": "papers-simple",
+    "prompt": "Use case: stylized-concept. Asset type: ONE standalone square Android file icon, matching a clean colorful softly dimensional illustrated desktop icon set for Copper Scroll. Subject: compact overlapping stack comprising a glossy BLUE MAGAZINE at the back left, one folded ivory NEWSPAPER diagonally on top of it, and TWO COLORED MAIL ENVELOPES in front (one coral-red and one golden yellow), each with a small postage stamp and restrained circular postmark. SIMPLIFIED detail variant: bold block shapes, magazine has one large abstract blue/teal picture area, newspaper only a few broad charcoal lines and an unreadable headline bar; stamps merely colored squares, postmarks simple arcs, envelope folds clear. All four main objects remain distinguishable, no tiny legible text, no real brands, no elaborate images. Soft upper-left lighting, satin surfaces and restrained bevels, clean silhouette. Slight overhead three-quarter view, centered compact composition occupying about 84 percent of canvas width and height, generous transparent margins, whole objects visible. Designed for recognition at 48–60 dp. No separate floating pieces, sparkles, extra accessories, caption, watermark, background tile, scene, ground plane or drop shadow. ONE square PNG image with actual alpha transparency, no checkerboard.",
+    "mode": "built-in image generation",
+    "reference": null
+  },
+  {
+    "key": "papers-detailed",
+    "prompt": "Use case: precise-object-edit. Create a DETAILED comparison variant of this exact magazine/newspaper/two-envelope icon. Preserve square canvas and real transparent alpha background, the exact overlapping four-object silhouette, positions, scale, angles, blue magazine / ivory newspaper / coral and yellow envelopes palette, and upper-left lighting. Increase surface detail without changing the composition: newspaper has many fine tiny unreadable text columns with a small halftone photo; magazine cover has a richer abstract landscape illustration with a few tiny unreadable cover lines; postage stamps have miniature animal/building/ship vignette art inside their existing shapes, fine serrated edges, detailed circular cancellation lines; subtle paper grain, fine folds, visible magazine page edges. All writing must be indistinct, no real names or brands. Keep same softly dimensional illustrated desktop-icon style, intended to compare detail loss at 48–60 dp. No added objects, labels, scene, background tile, floor, external shadow, checkerboard or watermark. Output one separate new square transparent PNG.",
+    "mode": "built-in image generation",
+    "reference": "papers-simple"
+  }
+]

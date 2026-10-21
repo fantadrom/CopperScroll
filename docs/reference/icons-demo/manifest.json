@@ -1,0 +1,59 @@
+{
+  "created": "2026-10-21",
+  "images": [
+    {
+      "file": "demo_bank_simple.png",
+      "width": 1254,
+      "height": 1254,
+      "mode": "RGBA",
+      "bytes": 1219157,
+      "sha256": "54512216949c5c5fda8eb6644514a55b239cdf99d716738bcf22ba68e7367a5c",
+      "transparent_background": true
+    },
+    {
+      "file": "demo_bank_detailed.png",
+      "width": 1254,
+      "height": 1254,
+      "mode": "RGBA",
+      "bytes": 1631825,
+      "sha256": "2ac4e4230203121438aeac3cb3db6c23c4457f3c8c1dbaedfe2ea3a0d1743419",
+      "transparent_background": true
+    },
+    {
+      "file": "demo_passport_simple.png",
+      "width": 1254,
+      "height": 1254,
+      "mode": "RGBA",
+      "bytes": 1408988,
+      "sha256": "1a169c17f384a901f7d55d723bd533b2d52ecb84e1c1151cce547af869a76ce8",
+      "transparent_background": true
+    },
+    {
+      "file": "demo_passport_detailed.png",
+      "width": 1254,
+      "height": 1254,
+      "mode": "RGBA",
+      "bytes": 2026392,
+      "sha256": "e9455378bea26a47b7b5c9175fde3d65cb5e7f86332e85ecf911e97dc559f4f9",
+      "transparent_background": true
+    },
+    {
+      "file": "demo_papers_simple.png",
+      "width": 1254,
+      "height": 1254,
+      "mode": "RGBA",
+      "bytes": 1504628,
+      "sha256": "7dc4be26ca165d80a6a54838c2cb0178c269817f482052644fc0f2fab02ec245",
+      "transparent_background": true
+    },
+    {
+      "file": "demo_papers_detailed.png",
+      "width": 1254,
+      "height": 1254,
+      "mode": "RGBA",
+      "bytes": 1984714,
+      "sha256": "c8cc88987384b88c924f2a567cad61c5a149a5a7a4dc931d374dc88d06d29347",
+      "transparent_background": true
+    }
+  ]
+}
