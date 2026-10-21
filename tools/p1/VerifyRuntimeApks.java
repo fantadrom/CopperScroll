@@ -29,6 +29,10 @@ public final class VerifyRuntimeApks {
         "Lcom/fantadrom/copperscroll/storage/io/ResourceOwner;", "Lcom/fantadrom/copperscroll/storage/io/FileChannelStore;",
         "Lcom/fantadrom/copperscroll/storage/io/FaultStore;", "Lcom/fantadrom/copperscroll/storage/io/LocalStateCodec;",
         "Lcom/fantadrom/copperscroll/storage/format/ContainerReader;", "Lcom/fantadrom/copperscroll/storage/format/CowCatalogue;",
+        "Lcom/fantadrom/copperscroll/storage/vfs/ZoneRepository;", "Lcom/fantadrom/copperscroll/storage/vfs/CowIndex;",
+        "Lcom/fantadrom/copperscroll/storage/vfs/NoteStorageAdapter;", "Lcom/fantadrom/copperscroll/storage/vfs/MediaStreams;",
+        "Lcom/fantadrom/copperscroll/storage/cards/CardCodec;", "Lcom/fantadrom/copperscroll/storage/cards/CardBody;",
+        "Lcom/fantadrom/copperscroll/storage/cards/DigitMask;", "Lcom/fantadrom/copperscroll/storage/cards/CardDraftSession;",
         "Lorg/bouncycastle/crypto/generators/Argon2BytesGenerator;",
         "Lorg/bouncycastle/crypto/generators/Argon2BytesGenerator$BlockPool;",
         "Lorg/bouncycastle/crypto/generators/HKDFBytesGenerator;", "Lorg/bouncycastle/crypto/macs/HMac;",
@@ -81,6 +85,12 @@ public final class VerifyRuntimeApks {
                     "namespaceAndLocalStateDurability", "catalogueSplitsAndLimits", "boundedStoreAndConflict"))
                 require((testIndex.classes.get(p3Suite).methods.getOrDefault(method+"()V",0) & 1) != 0,
                     "P3 expected runtime method missing: " + method);
+            String p4Suite="Lcom/fantadrom/copperscroll/storage/runtime/P4VfsCardRuntimeTest;";
+            require(testClasses.contains(p4Suite) && !appClasses.contains(p4Suite),"P4 suite must belong to test APK only");
+            for(String method:List.of("vfsBatchDepthTrash","noteRichTextRevision","cardFieldRoundTripAndGolden","cardAtomicSaveAndDraft",
+                    "masksDatesAndConstraints","templatesAndGlobalMessagePolicy","mediaStreamingAndCow","faultCommitUnknownAndRevoke",
+                    "compatibilityRecoveryAndBudgets","sortingSettingsAndZoneIsolation"))
+                require((testIndex.classes.get(p4Suite).methods.getOrDefault(method+"()V",0)&1)!=0,"P4 expected runtime method missing: "+method);
             require(testClasses.contains("Lcom/fantadrom/copperscroll/storage/runtime/P2KdfBenchmark;") == benchmark,
                 "KDF benchmark must be compiled only for the explicit benchmark profile");
             for (String name : testClasses) {
@@ -88,6 +98,8 @@ public final class VerifyRuntimeApks {
                     !name.startsWith("Lcom/fantadrom/copperscroll/storage/format/") &&
                     !name.startsWith("Lcom/fantadrom/copperscroll/storage/io/") &&
                     !name.startsWith("Lcom/fantadrom/copperscroll/storage/transaction/") &&
+                    !name.startsWith("Lcom/fantadrom/copperscroll/storage/vfs/") &&
+                    !name.startsWith("Lcom/fantadrom/copperscroll/storage/cards/") &&
                     !name.startsWith("Lcom/fantadrom/copperscroll/storage/crypto/") && !name.startsWith("Lorg/bouncycastle/") &&
                     !name.startsWith("Lcom/ibm/icu/") && !name.startsWith("Lco/nstant/in/cbor/"),
                     "Instrumentation APK contains a second backend implementation");
@@ -113,6 +125,11 @@ public final class VerifyRuntimeApks {
             require(MessageDigest.isEqual(read(tests, "assets/p2/crypto.properties", 16384),
                 Files.readAllBytes(golden.getParent().getParent().resolve("p2/crypto.properties"))),
                 "Android P2 fixture differs from independent frozen JVM fixture");
+            for(String fixture:List.of("golden.tsv","negative.tsv")) {
+                require(app.getEntry("assets/p4/"+fixture)==null,"P4 synthetic fixtures must not ship in target");
+                require(MessageDigest.isEqual(read(tests,"assets/p4/"+fixture,65536),
+                    Files.readAllBytes(golden.getParent().getParent().resolve("p4/"+fixture))),"P4 independent fixture mismatch");
+            }
             for (String name : List.of("ICU-76.1.txt", "CBOR-0.9.txt", "BC-1.86.txt", "NOTICE.txt"))
                 require(app.getEntry("assets/third-party/" + name) != null, "License/NOTICE missing");
             String summary = "artifactAudit=PASS\nvariant=p1Release\nruntime=NOT_RUN\n" + identity + linkage +

@@ -10,7 +10,8 @@ import java.security.MessageDigest
 enum class WriteCode { Committed, NoOp, Conflict, ValidationError, IoFailure, CommitUnknown, UnknownOperation, InvalidOperationToken,
     AccessLost, Busy, UnsupportedDurability, UnsupportedVersion, UnsupportedSecretEncoding, CorruptData, ResourceLimit, Limit, NotApplied }
 class WriteOutcome(val code: WriteCode, val generation: Long? = null, val zoneSequence: Long? = null,
-                   val revision: Long? = null, val objectId: Bytes? = null) {
+                   val revision: Long? = null, val objectId: Bytes? = null, overflow: List<Bytes> = emptyList()) {
+    val overflow: List<Bytes> = java.util.Collections.unmodifiableList(ArrayList(overflow))
     override fun toString() = "WriteOutcome(code=$code,generation=$generation,zoneSequence=$zoneSequence,revision=$revision)"
 }
 class SettingsMutation(val expectedZoneSequence: Long, val expectedRevision: Long, val revision: Long,
@@ -33,11 +34,18 @@ class AppliedHint(val opId: Bytes, val objectId: Bytes?) // explicitly NOT a Com
 class TransactionCore internal constructor(val owner: ResourceOwner, private val beforeAck: () -> Unit) : AutoCloseable {
     constructor(owner: ResourceOwner) : this(owner,{})
     private class NewZone(val prepared: PreparedZone, val hint: String, val normal: Bytes, val trash: Bytes,
-                          val add: Boolean, val expectedHeader: Bytes?)
+                          val add: Boolean, val expectedHeader: Bytes?, val minor: Int)
     private class Pending(val token: OperationToken, val before: Bytes?, val candidate: Bytes, val zoneKey: ZoneKey,
-                          val revision: Long, val sequence: Long, val creating: Boolean)
+                          val revision: Long, val sequence: Long, val creating: Boolean,
+                          val resultObjectId: Bytes? = null, val overflow: List<Bytes> = emptyList(),
+                          val verificationRefs: List<LogicalRef> = emptyList())
     private val store = owner.store
-    private val reader = ContainerReader(store)
+    private var readCheck: ()->Unit = {}
+    private val reader = ContainerReader(store,accessCheck={ readCheck() })
+    private fun <T> checking(permit: WritePermit,block: ()->T): T {
+        val previous = readCheck; readCheck = { owner.check(permit) }
+        try { return block() } finally { readCheck = previous }
+    }
     private val records = RecordCrypto()
     private val epoch = Any()
     private val tokens = LinkedHashMap<Bytes,OperationToken>()
@@ -47,26 +55,30 @@ class TransactionCore internal constructor(val owner: ResourceOwner, private val
     private var pending: Pending? = null
     @Synchronized fun attach(ownedKey: ZoneKey): ZoneView {
         val permit = owner.accept()
-        return owner.execute(permit) {
+        return owner.execute(permit) { checking(permit) {
             requireIo(key == null)
             val s = reader.snapshot(); val view = reader.openZone(s,ownedKey)
             owner.check(permit); owner.adopt(ownedKey); key = ownedKey; snapshot = s; view
-        }
+        } }
     }
-    @Synchronized fun issueCreate(prepared: PreparedZone, hint: String = ""): OperationToken {
+    @Synchronized fun issueCreate(prepared: PreparedZone, hint: String = "", containerMinor: Int = 1): OperationToken {
         requireIo(snapshot == null && key == null && store.size == 0L)
         requireIo(store.guarantees.existingWriteDurable && store.guarantees.durableCreateIdentity,IoCode.UnsupportedDurability)
         requireCrypto(prepared.key.role == 1)
-        return issueNew(prepared,hint,false)
+        checkFormat(containerMinor in 1..2,Failure.UnsupportedVersion)
+        return issueNewWithMinor(prepared,hint,false,containerMinor)
     }
     private fun issueNew(prepared: PreparedZone, hint: String, add: Boolean): OperationToken {
+        return issueNewWithMinor(prepared,hint,add,snapshot?.header?.minor ?: 1)
+    }
+    private fun issueNewWithMinor(prepared: PreparedZone, hint: String, add: Boolean, minor: Int): OperationToken {
         requireCrypto(hint.toByteArray(Charsets.UTF_8).size <= 512)
         val permit = owner.accept()
         val normal = randomId(); var trash = randomId()
         requireCrypto(normal != trash,CryptoFailure.Collision)
-        val request = NewZone(prepared,hint,normal,trash,add,snapshot?.headerBytes?.let { sha(it.copy()) })
+        val request = NewZone(prepared,hint,normal,trash,add,snapshot?.headerBytes?.let { sha(it.copy()) },minor)
         val binding = Bytes(StrictCbor.encode(listOf(if(add) "AddZone" else "Create",Bytes(prepared.envelope.aad()),
-            prepared.envelope.nonce,prepared.envelope.wrappedKey,hint,normal,trash,snapshot?.headerBytes?.let { sha(it.copy()) })))
+            prepared.envelope.nonce,prepared.envelope.wrappedKey,hint,normal,trash,snapshot?.headerBytes?.let { sha(it.copy()) },minor)))
         owner.adopt(prepared)
         try { return register(permit,binding,request) } catch(e: Throwable) { owner.retire(prepared); throw e }
     }
@@ -93,13 +105,41 @@ class TransactionCore internal constructor(val owner: ResourceOwner, private val
         requireIo(request.expectedZoneSequence > 0 && request.expectedRevision >= 0 && request.revision > request.expectedRevision)
         return register(owner.acceptCheckpoint(),Bytes(request.binding()),request)
     }
+    @Synchronized internal fun issueZoneMutation(request: ZoneMutation): OperationToken {
+        requireIo(snapshot != null && key != null,IoCode.AccessLost)
+        requireIo(request.expectedZoneSequence > 0 && request.expectedRevision >= 0 && request.revision > request.expectedRevision)
+        requireIo(request.retainedBytes <= 32L*1024*1024,IoCode.InvalidRange)
+        val permit = if(request.checkpoint) owner.acceptCheckpoint() else owner.accept()
+        owner.adopt(request)
+        try { return register(permit,Bytes(request.binding()),request) }
+        catch(e: Throwable) { owner.retire(request); throw e }
+    }
+    /** Does not acquire the core mutex: a blocked syscall must not delay access revocation. */
+    fun revokeForClosingSave(token: OperationToken? = null) {
+        if(token != null) requireIo(token.epoch === epoch,IoCode.AccessLost)
+        owner.revoke(token?.permit)
+    }
+    @Synchronized internal fun <T> readZone(block: (ReadSnapshot,ZoneKey,ZoneView,ContainerReader,()->Unit) -> T): T {
+        val permit = owner.accept()
+        return owner.execute(permit) { checking(permit) {
+            owner.check(permit)
+            val s = snapshot ?: throw StoreException(IoCode.AccessLost)
+            val k = key ?: throw StoreException(IoCode.AccessLost)
+            val view = reader.openZone(s,k)
+            checkFormat(!view.readOnly,Failure.UnsupportedVersion)
+            val result = block(s,k,view,reader,{ owner.check(permit) })
+            owner.check(permit); result
+        } }
+    }
+    @Synchronized internal fun requestRevision(): Long { requireIo(!owner.accessRevoked,IoCode.AccessLost); return revision }
     private fun register(permit: WritePermit, binding: Bytes, request: Any): OperationToken {
         val id = randomId(); requireCrypto(id !in tokens,CryptoFailure.Collision)
         val token = OperationToken(id,epoch,permit,binding,request); tokens[id] = token
-        while(tokens.size > 256) {
+        while(tokens.size > 256 || tokens.values.sumOf { (it.request as? ZoneMutation)?.retainedBytes ?: 0 } > 32L*1024*1024) {
             val oldest = tokens.entries.first(); requireIo(pending?.token !== oldest.value,IoCode.Busy)
             val oldRequest = oldest.value.request
             if(oldRequest is NewZone && oldRequest.prepared.key !== key) owner.retire(oldRequest.prepared)
+            if(oldRequest is ZoneMutation) owner.retire(oldRequest)
             tokens.remove(oldest.key)
         }
         return token
@@ -111,7 +151,7 @@ class TransactionCore internal constructor(val owner: ResourceOwner, private val
             return WriteOutcome(WriteCode.InvalidOperationToken)
         if(owner.reconciliationRequired) return WriteOutcome(WriteCode.CommitUnknown)
         token.outcome?.let { return it }
-        return try { owner.execute(token.permit) { commit(token) } }
+        return try { owner.execute(token.permit) { checking(token.permit) { commit(token) } } }
         catch(e: StoreException) { WriteOutcome(if(e.code == IoCode.Busy) WriteCode.Busy else ioCode(e)) }
     }
     private fun commit(token: OperationToken): WriteOutcome {
@@ -128,7 +168,8 @@ class TransactionCore internal constructor(val owner: ResourceOwner, private val
                 }
             } else requireIo(store.size == 0L)
             val request = token.request
-            val target: ZoneKey; val descriptor: Descriptor?; val root: RootData?; val newSettings: ByteArray
+            val target: ZoneKey; val descriptor: Descriptor?; val root: RootData?; val newSettings: ByteArray?
+            var currentView: ZoneView? = null
             val nextSequence: Long; val nextGeneration: Long
             if(old?.header?.generation == Long.MAX_VALUE) return terminal(token,WriteOutcome(WriteCode.Limit))
             nextGeneration = (old?.header?.generation ?: 0) + 1
@@ -145,35 +186,56 @@ class TransactionCore internal constructor(val owner: ResourceOwner, private val
                 target = request.prepared.key; descriptor = null; root = null; nextSequence = 1
                 newSettings = SettingsCodec.encode(SettingsData())
             } else {
-                request as SettingsMutation; target = key!!
+                target = key!!
                 descriptor = old!!.header.zones.single { it.zoneId == target.zoneId }
-                if(descriptor.sequence != request.expectedZoneSequence || revision != request.expectedRevision)
+                val expectedSeq = if(request is SettingsMutation) request.expectedZoneSequence else (request as ZoneMutation).expectedZoneSequence
+                val expectedRevision = if(request is SettingsMutation) request.expectedRevision else (request as ZoneMutation).expectedRevision
+                if(descriptor.sequence != expectedSeq || revision != expectedRevision)
                     return terminal(token,WriteOutcome(WriteCode.Conflict))
                 if(descriptor.sequence == Long.MAX_VALUE) return terminal(token,WriteOutcome(WriteCode.Limit))
                 val view = reader.openZone(old,target)
                 if(view.readOnly) return terminal(token,WriteOutcome(WriteCode.UnsupportedVersion))
-                root = view.root!!; nextSequence = descriptor.sequence + 1; newSettings = request.payload.copy()
+                currentView = view; root = view.root!!; nextSequence = descriptor.sequence + 1
+                newSettings = (request as? SettingsMutation)?.payload?.copy()
             }
             ownedSettings = newSettings
             if(old == null) store.writeFullyAt(0,ByteArray(131072))
             val known = old?.catalogues?.flatMap { it.keys }?.toHashSet() ?: HashSet()
             val appended = ArrayList<Pair<Bytes,PhysicalRef>>()
+            val newRecords = HashMap<Bytes,PhysicalRef>()
+            val verificationRefs = ArrayList<LogicalRef>()
             val reservation = RecordIdReservation { known.add(it) }
-            fun record(kind: Int, plain: ByteArray): LogicalRef {
+            fun record(kind: Int, plain: ByteArray, ownerId: Bytes = target.zoneId, ordinal: Long = 0): LogicalRef {
                 try {
                     owner.check(token.permit)
-                    val encrypted = records.encrypt(target,kind,target.zoneId,0,plain,reservation)
+                    if(request is ZoneMutation) checkFormat((known.size.toLong()+newRecords.size)*384 <= 32L*1024*1024,Failure.ResourceLimit)
+                    val encrypted = records.encrypt(target,kind,ownerId,ordinal,plain,reservation)
                     val offset = store.appendAligned(encrypted.raw.copy())
-                    appended.add(encrypted.reference.recordId to PhysicalRef(offset,encrypted.raw.size.toLong(),encrypted.reference.hash))
+                    val physical = PhysicalRef(offset,encrypted.raw.size.toLong(),encrypted.reference.hash)
+                    appended.add(encrypted.reference.recordId to physical); newRecords[encrypted.reference.recordId] = physical
+                    if(request is ZoneMutation) verificationRefs.add(encrypted.reference)
                     return encrypted.reference
                 } finally { plain.fill(0) }
             }
-            val objects = root?.objects ?: record(2,IndexCodec.encode(IndexPage(1,0,emptyList()),target.zoneId))
-            val children = root?.children ?: record(2,IndexCodec.encode(IndexPage(2,0,emptyList()),target.zoneId))
-            val settings = record(3,newSettings)
-            val recent = if(root == null) emptyList() else (root.recentOperations + (token.opId to null)).takeLast(256)
+            val edit = if(request is ZoneMutation) request.apply(ZoneWriteContext(old!!,currentView!!,
+                { ref ->
+                    val p = newRecords[ref.recordId]
+                    if(p == null) reader.readRecord(old,target,ref)
+                    else records.decrypt(target,store.readFullyAt(p.offset,p.length.toInt()),ref).use { it.copyBytes() }
+                }, { kind,ownerId,ordinal,b -> record(kind,b,ownerId,ordinal) }, { owner.check(token.permit) })) else null
+            if(edit?.noOp == true) {
+                checkFormat(appended.isEmpty()); revision = (request as ZoneMutation).revision
+                return terminal(token,WriteOutcome(WriteCode.NoOp,old!!.header.generation,descriptor!!.sequence,revision,
+                    if(edit.noObject) null else request.resultObjectId,edit.overflow))
+            }
+            val state = edit?.root ?: root
+            val objects = state?.objects ?: record(2,IndexCodec.encode(IndexPage(1,0,emptyList()),target.zoneId))
+            val children = state?.children ?: record(2,IndexCodec.encode(IndexPage(2,0,emptyList()),target.zoneId))
+            val settings = if(newSettings != null) record(3,newSettings) else state!!.settings
+            val resultObjectId = (request as? ZoneMutation)?.resultObjectId
+            val recent = if(root == null) emptyList() else (root.recentOperations + (token.opId to resultObjectId)).takeLast(256)
             val newRoot = RootData(nextSequence,root?.normalRoot ?: (request as NewZone).normal,
-                root?.trashRoot ?: (request as NewZone).trash,objects,children,settings,root?.nextPinSequence ?: 1uL,recent)
+                root?.trashRoot ?: (request as NewZone).trash,objects,children,settings,state?.nextPinSequence ?: 1uL,recent)
             val rootRef = record(1,RootCodec.encode(newRoot,target.zoneId))
             val catalogue = CowCatalogue(store,target.zoneId)
             var catalogueRoot = descriptor?.catalogue
@@ -187,12 +249,14 @@ class TransactionCore internal constructor(val owner: ResourceOwner, private val
                 draft.salt,draft.wrapNonce,draft.wrappedKey,draft.hint,draft.root,records.descriptorMac(target,draft),draft.catalogue)
             val zones = old?.header?.zones?.map { if(it.zoneId == target.zoneId) changed else it }?.toMutableList() ?: mutableListOf()
             if(zones.none { it.zoneId == target.zoneId }) zones.add(changed)
-            val header = Superblock(nextGeneration,store.size,target.containerId,old?.header?.instanceId ?: randomId(),zones)
+            val header = Superblock(nextGeneration,store.size,target.containerId,old?.header?.instanceId ?: randomId(),zones,
+                old?.header?.minor ?: (request as NewZone).minor)
             val bytes = SuperblockCodec.encode(header)
             owner.check(token.permit); store.force() // DATA barrier precedes header publication.
             owner.check(token.permit)
             pending = Pending(token,old?.headerBytes,Bytes(bytes),target,
-                (request as? SettingsMutation)?.revision ?: revision,nextSequence,old == null)
+                (request as? SettingsMutation)?.revision ?: (request as? ZoneMutation)?.revision ?: revision,nextSequence,old == null,
+                resultObjectId,edit?.overflow ?: emptyList(),verificationRefs)
             publishing = true; owner.markUnknown()
             store.writeFullyAt(if(old == null) 0 else (1-old.slot)*65536L,bytes)
             owner.check(token.permit); store.force()
@@ -205,9 +269,11 @@ class TransactionCore internal constructor(val owner: ResourceOwner, private val
             if(publishing) return WriteOutcome(WriteCode.CommitUnknown)
             val result = WriteOutcome(when(e) {
                 is OutOfMemoryError -> WriteCode.ResourceLimit
+                is MutationRefusal -> e.code
                 is StoreException -> ioCode(e)
                 is FormatException -> when(e.failure) {
                     Failure.ResourceLimit -> WriteCode.ResourceLimit
+                    Failure.UnsupportedLimit -> WriteCode.Limit
                     Failure.UnsupportedVersion -> WriteCode.UnsupportedVersion
                     Failure.ValidationError -> WriteCode.ValidationError
                     else -> WriteCode.CorruptData
@@ -228,12 +294,15 @@ class TransactionCore internal constructor(val owner: ResourceOwner, private val
     private fun verifyCandidate(p: Pending): ReadSnapshot {
         val actual = reader.snapshot(); checkFormat(actual.headerBytes == p.candidate)
         val view = reader.openZone(actual,p.zoneKey); checkFormat(!view.readOnly && view.root?.sequence == p.sequence)
+        for(ref in p.verificationRefs) {
+            val plain = reader.readRecord(actual,p.zoneKey,ref); plain.fill(0)
+        }
         return actual
     }
     private fun finish(actual: ReadSnapshot): WriteOutcome {
         val p = pending!!; snapshot = actual; revision = p.revision
         if(key == null) key = p.zoneKey
-        val result = WriteOutcome(WriteCode.Committed,actual.header.generation,p.sequence,p.revision)
+        val result = WriteOutcome(WriteCode.Committed,actual.header.generation,p.sequence,p.revision,p.resultObjectId,p.overflow)
         pending = null; owner.resolved()
         return terminal(p.token,result)
     }
@@ -241,6 +310,7 @@ class TransactionCore internal constructor(val owner: ResourceOwner, private val
         token.outcome = result
         val request = token.request
         if(request is NewZone && (request.add || result.code != WriteCode.Committed)) owner.retire(request.prepared)
+        if(request is ZoneMutation) owner.retire(request)
         return result
     }
     /** No destructive replay. Reread, force the observed state, reread and authenticate before ACK.
@@ -320,6 +390,6 @@ class RevisionTracker(initial: Long = 0) {
     val dirty get() = current != acknowledged
     fun edited() { require(current < Long.MAX_VALUE); current++ }
     fun acknowledge(result: WriteOutcome) {
-        if(result.code == WriteCode.Committed) result.revision?.let { require(it <= current); acknowledged = maxOf(acknowledged,it) }
+        if(result.code == WriteCode.Committed || result.code == WriteCode.NoOp) result.revision?.let { require(it <= current); acknowledged = maxOf(acknowledged,it) }
     }
 }

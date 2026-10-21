@@ -1,0 +1,14 @@
+{
+  "author": "independent Python stdlib positional CBOR encoder",
+  "container_versions": [
+    "1.1 unchanged legacy fixtures",
+    "1.2 P4"
+  ],
+  "good_count": 3,
+  "negative_count": 12,
+  "generator_sha256": "fa12869c024a8aa27ac67fb016835214a88559881453a76ecc3a9a4a1d32d157",
+  "files": {
+    "golden.tsv": "2dee0d6cf54d5ca826e5fe9cd5986ee86064fab64ae30128227f1159c980c7ed",
+    "negative.tsv": "feda53752393f33d7001b329732ad982f0391c5a1d7a0c9f12e4288fbc86122e"
+  }
+}

@@ -12,7 +12,7 @@ ROOT = Path(__file__).resolve().parents[3]
 ARCH = ROOT / 'docs/architecture'
 DOCS = ['container-design.md', 'container-format-v1.md', 'container-test-plan.md',
         'container-prototype-plan.md', 'compaction-requirements-addendum.md',
-        'container-review-resolution.md', 'reconciliation-materials/README.md']
+        'container-review-resolution.md', 'reconciliation-materials/README.md', 'container-p4-extension.md']
 
 
 def slugs(text):
