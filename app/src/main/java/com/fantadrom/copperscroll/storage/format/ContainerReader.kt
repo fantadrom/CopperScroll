@@ -11,7 +11,9 @@ class ReadSnapshot internal constructor(val header: Superblock, val slot: Int, v
                                        val recovery: Boolean = false)
 class ZoneView internal constructor(val snapshot: ReadSnapshot, val descriptor: Descriptor,
                                    val root: RootData?, val settings: SettingsData?, val readOnly: Boolean,
-                                   val unsupported: Failure? = null) {
+                                   val unsupported: Failure? = null,
+                                   val objects: Map<Bytes,ObjectData> = emptyMap(),
+                                   val objectRefs: Map<Bytes,LogicalRef> = emptyMap()) {
     override fun toString() = "ZoneView(redacted,readOnly=$readOnly,unsupported=$unsupported)"
 }
 /** Owner of an authenticated read-only key handle; no writer capability is granted. */
@@ -24,7 +26,8 @@ class ReadSession internal constructor(val view: ZoneView, val key: ZoneKey) : A
  * remain lazy. VerifyAll additionally reads every catalogue record/hash and all reachable AEAD.
  * No key, plaintext or session is published by mere public framing selection.
  */
-class ContainerReader(private val store: RandomAccessStore, private val maxMapBytes: Long = 32L*1024*1024) {
+class ContainerReader(private val store: RandomAccessStore, private val maxMapBytes: Long = 32L*1024*1024,
+                      private val accessCheck: ()->Unit = {}) {
     init { require(maxMapBytes in 1024..32L*1024*1024) }
     private val crypto = RecordCrypto()
     fun open(secret: CanonicalSecret): ReadSession {
@@ -58,11 +61,12 @@ class ContainerReader(private val store: RandomAccessStore, private val maxMapBy
         val frame = frames[slot] ?: throw FormatException(Failure.CorruptHeader)
         checkFormat(frame.generation == generation,Failure.CorruptHeader)
         frames[1-slot]?.let {
+            checkFormat(it.minor == frame.minor,Failure.UnsupportedVersion)
             checkFormat(it.containerId == frame.containerId && it.instanceId == frame.instanceId,Failure.CorruptHeader)
             if(it.generation == generation) checkFormat(it.bytes == frame.bytes,Failure.CorruptHeader)
         }
         val descriptor = SuperblockCodec.recoveryDescriptor(frame,role)
-        val h = Superblock(frame.generation,frame.committedLength,frame.containerId,frame.instanceId,listOf(descriptor))
+        val h = Superblock(frame.generation,frame.committedLength,frame.containerId,frame.instanceId,listOf(descriptor),frame.minor)
         return inspect(h,slot,slots[slot],size,true)
     }
     private fun inspect(header: Superblock, slot: Int, bytes: ByteArray, size: Long, recovery: Boolean): ReadSnapshot {
@@ -78,12 +82,14 @@ class ContainerReader(private val store: RandomAccessStore, private val maxMapBy
         val catalogues = header.zones.map { descriptor ->
             val records = TreeMap<Bytes,PhysicalRef>(); var previous: Bytes? = null
             fun walk(ref: PhysicalRef, level: Int?): Pair<Bytes,Bytes> {
+                accessCheck()
                 reserve(ref); ref.validate(header.committedLength,Limits.PAGE.toLong())
                 val raw = store.readFullyAt(ref.offset,Limits.PAGE); checkFormat(sha(raw) == ref.hash)
                 val p = CatalogueCodec.decode(raw,header.committedLength)
                 checkFormat(p.zoneId == descriptor.zoneId && (level == null || p.level == level) && p.entries.isNotEmpty())
                 var first: Bytes? = null; var last: Bytes? = null
                 for(e in p.entries) {
+                    accessCheck()
                     if(p.level == 0) {
                         checkFormat(previous?.let { it < e.key } ?: true); previous = e.key
                         val record = e.record!!; reserve(record)
@@ -109,6 +115,33 @@ class ContainerReader(private val store: RandomAccessStore, private val maxMapBy
     }
     fun openZone(snapshot: ReadSnapshot, key: ZoneKey): ZoneView = zone(snapshot,key,false)
     fun verifyAll(snapshot: ReadSnapshot, key: ZoneKey): ZoneView = zone(snapshot,key,true)
+    /** Caller owns the active IO lease and authenticated snapshot/key. No plaintext before tag. */
+    internal fun readRecord(snapshot: ReadSnapshot, key: ZoneKey, ref: LogicalRef): ByteArray {
+        accessCheck()
+        checkFormat(snapshot.header.containerId == key.containerId)
+        val i = snapshot.header.zones.indexOfFirst { it.zoneId == key.zoneId && it.role == key.role }; checkFormat(i >= 0)
+        val physical = snapshot.catalogues[i][ref.recordId] ?: throw FormatException(Failure.CorruptData)
+        checkFormat(physical.hash == ref.hash)
+        return crypto.decrypt(key,store.readFullyAt(physical.offset,physical.length.toInt()),ref).use { it.copyBytes() }
+    }
+    internal fun readDocument(snapshot: ReadSnapshot, key: ZoneKey, owner: Bytes, refs: List<LogicalRef>,
+                              length: Long, maximum: Int, packed: Boolean = false): ByteArray {
+        accessCheck()
+        checkFormat(length in 1..maximum.toLong() && refs.size in 1..(maximum/Limits.CHUNK))
+        val out = ByteArray(length.toInt()); var position = 0
+        try {
+            for((i,ref) in refs.withIndex()) {
+                ref.validate(4,owner,i.toLong())
+                val chunk = readRecord(snapshot,key,ref)
+                try {
+                    checkFormat(chunk.isNotEmpty() && chunk.size <= Limits.CHUNK &&
+                        (!packed || i == refs.lastIndex || chunk.size == Limits.CHUNK) && chunk.size <= out.size-position)
+                    chunk.copyInto(out,position); position += chunk.size
+                } finally { chunk.fill(0) }
+            }
+            checkFormat(position == out.size); return out
+        } catch(e: Throwable) { out.fill(0); throw e }
+    }
     private fun zone(snapshot: ReadSnapshot, key: ZoneKey, full: Boolean): ZoneView {
         val i = snapshot.header.zones.indexOfFirst { it.zoneId == key.zoneId && it.role == key.role }
         checkFormat(i >= 0 && snapshot.header.containerId == key.containerId)
@@ -119,6 +152,7 @@ class ContainerReader(private val store: RandomAccessStore, private val maxMapBy
             mapBytes += extra
         }
         fun plain(ref: LogicalRef): ByteArray {
+            accessCheck()
             checkFormat(visited.add(ref.recordId)) // cycles/repeated graph edges, not catalogue history
             checkFormat(mapBytes + visited.size*128L <= maxMapBytes,Failure.ResourceLimit)
             val physical = catalogue[ref.recordId] ?: throw FormatException(Failure.CorruptData)
@@ -131,7 +165,7 @@ class ContainerReader(private val store: RandomAccessStore, private val maxMapBy
         try {
             val root = decode(d.root) { RootCodec.decode(it,d.zoneId,d.sequence) }
             val settings = decode(root.settings,SettingsCodec::decode)
-            val objects = TreeMap<Bytes,ObjectData>(); val children = HashSet<Pair<Bytes,Bytes>>()
+            val objects = TreeMap<Bytes,ObjectData>(); val objectRefs = TreeMap<Bytes,LogicalRef>(); val children = HashSet<Pair<Bytes,Bytes>>()
             fun index(ref: LogicalRef, type: Int, expected: Int?): Pair<IndexKey?,IndexKey?> {
                 val p = decode(ref) { IndexCodec.decode(it,d.zoneId) }
                 checkFormat(p.type == type && (expected == null || p.level == expected))
@@ -141,9 +175,10 @@ class ContainerReader(private val store: RandomAccessStore, private val maxMapBy
                         checkFormat(last == null || last < e.key)
                         if(type == 1) {
                             val obj = decode(e.value!!) {
-                                budget(it.size*4L+768); ObjectCodec.decode(it,e.key.first,root.nextPinSequence)
+                                budget(it.size*4L+768); ObjectCodec.decode(it,e.key.first,root.nextPinSequence,snapshot.header.minor)
                             }
                             checkFormat(objects.put(obj.id,obj) == null && objects.size <= 1000000)
+                            objectRefs[obj.id] = e.value!!
                         } else { budget(256); checkFormat(children.add(e.key.first to e.key.second!!)) }
                         if(first == null) first = e.key; last = e.key
                     } else {
@@ -157,14 +192,16 @@ class ContainerReader(private val store: RandomAccessStore, private val maxMapBy
             index(root.objects,1,null); index(root.children,2,null)
             checkFormat(objects.keys.none { it == root.normalRoot || it == root.trashRoot })
             checkFormat(children == objects.values.map { it.parent to it.id }.toSet())
+            var cardBytes = 0L
             for(o in objects.values) {
+                accessCheck()
                 var parent = o.parent; var depth = if(o.type == 1) 1 else 0; val ancestors = HashSet<Bytes>()
                 while(parent != root.normalRoot && parent != root.trashRoot) {
                     checkFormat(ancestors.add(parent) && ++depth <= 63)
                     val folder = objects[parent] ?: throw FormatException(Failure.CorruptData)
                     checkFormat(folder.type == 1); parent = folder.parent
                 }
-                if(full) when(val payload = o.payload) {
+                if(full || o.payload is CardPayload) when(val payload = o.payload) {
                     FolderPayload -> Unit
                     is NotePayload -> {
                         val chunks = ArrayList<ByteArray>()
@@ -190,10 +227,17 @@ class ContainerReader(private val store: RandomAccessStore, private val maxMapBy
                         }
                         chunks(payload.chunks,null); checkFormat(count == payload.chunkCount && total == payload.byteLength)
                     }
+                    is CardPayload -> {
+                        cardBytes += payload.bodyBytes; checkFormat(cardBytes <= maxMapBytes,Failure.ResourceLimit)
+                        val b = readDocument(snapshot,key,o.id,payload.chunks,payload.bodyBytes,
+                            com.fantadrom.copperscroll.storage.cards.CardLimits.BODY,true)
+                        try { com.fantadrom.copperscroll.storage.cards.CardCodec.decode(b) } finally { b.fill(0) }
+                    }
                 }
             }
             if(full) for(p in catalogue.values) checkFormat(sha(store.readFullyAt(p.offset,p.length.toInt())) == p.hash)
-            return ZoneView(snapshot,d,root,settings,snapshot.recovery)
+            return ZoneView(snapshot,d,root,settings,snapshot.recovery,null,
+                java.util.Collections.unmodifiableMap(objects),java.util.Collections.unmodifiableMap(objectRefs))
         } catch(e: FormatException) {
             if(!full && e.failure in listOf(Failure.UnsupportedVersion,Failure.UnsupportedLimit))
                 return ZoneView(snapshot,d,null,null,true,e.failure)

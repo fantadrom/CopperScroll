@@ -9,13 +9,45 @@ head P2 `134dbbb0cee49d3623f40f557e6adf837c206e5e`. GitHub API подтверд�
 AGENTS.md в репозитории/родителях не найден. SDK37/min31, Gradle9.6.0,
 AGP9.4.1/Kotlin2.2.10/Java11, зависимости, manifest и wire1.1 сохранены.
 
-**Статус: P3 реализован на синтетических данных; Android runtime ещё не выполнен.**
+**Статус: P3 реализован на синтетических данных; пользовательский Android runtime
+подтверждён предоставленным receipt20 октября2026.**
 Это не SAF/UI/VFS/compact/rekey, не профиль физической долговечности и не разрешение
 на реальные данные. Вход P3 явно разрешён новым заданием независимо от незавершённых
 KDF benchmarks. Полученные пользовательские P1/P2 runtime receipts внесены в
 [p2-report.md](p2-report.md):8/7 PASS на Honor15 и эмуляторе17, одна APK пара,
 bundle `d7fec5127795aecc51acdfd4d164b34d7a03089d5d2964b6e8db2cdf5d8d1d1c`.
 Это пользовательские результаты предыдущей базы, не Android PASS новой P3 сборки.
+
+## Пользовательский P3 runtime и принятие базы P4
+
+Пользователь предоставил итоговый `runtime-result.txt`: `runtime=PASS`,
+`variant=p1Release`, suite `P3TransactionRuntimeTest`, runId
+`619c964b-c0fb-4a8a-80d6-82f8a546bc8c`, по8 tests на двух devices,
+failures/errors/skipped=0. В задании устройства обозначены как Honor Android15
+и эмулятор Android17; сам receipt содержит serial IDs, без API/версии Gradle.
+Версия Gradle прогона не подтверждена,9.8.0 не предполагается.
+
+Это предоставленный пользователем итоговый receipt, не запуск агента и не
+повторная проверка исходных XML/protobuf. SHA256 receipt:
+`9d88bf41e499c44d83ab63e5e89fb967cc0efe0a5b5c06788636f93312073428`.
+
+```properties
+artifactBundleId=f0084b2b3de360594ec7073b6644cded298524fa88162682ea163bdd589ccabe
+targetSha256=feff2d6f25afcdeb98074e8e7e300d1558cb5bc69a92fa460aef9ea5249dd34b
+testSha256=d3b97fc7ee5b7ccd50dc9ddce519fc705c6e2b0e2b5b1e8c00b5b33909a96009
+targetMapId=458cd4b0ca0ca456c968dce50cba35ff1887ffc1be8297e2170fde70354056c7
+testMapId=5edf064ee13605634c6d803c6f400c7283bc63e75dafd8154efdb5985aa026e2
+targetMappingSha256=3b266786b0910064c7af7fea56ae65fcf6dc09c082c5f5515d8c6fcc30b820fc
+testMappingSha256=9995e256da3dfec4266ab1a93c91e9411c8305b34ed6b671314b6d5e7dcefd53
+```
+
+Пользователь слил PR №8 в master `b38de25c438e05b76fda9b668d7f802cc0466716`,
+содержащий P3 head `37f7b7994341bef7b9c98aec9b1f84d5d038bf56`; tree
+`b8cdcfe563acc05df20b36f868be0a0933bdea78`. Это проверенная база P4.
+Пользовательские runtime-условия P3 закрыты; device KDF/provider/security gates
+остаются открытыми. Ограничения p1Release ниже сохранены; это не обычный release.
+Остальная секция фактически выполненных агентом проверок — исторические результаты
+исходной P3 сборки, у которой runtime=NOT_RUN.
 
 ## Реализованные контракты
 
@@ -272,8 +304,8 @@ androidx/kotlin/kotlinx; storage/ICU/CBOR/BC вне него. Ни runtime эт�
 
 ## Готовность к P4 и открытые условия
 
-JVM core и fault model дают базу для synthetic P4. Android P3 runtime ожидает
-подтверждения пользователем; полная приёмка и production readiness не объявлены.
+JVM core/fault model и пользовательский runtime receipt выше дают принятую базу
+для synthetic P4. Production readiness не объявлена.
 KDF cold/warm/thermal/OOM на слабом/среднем телефоне, универсальный creation profile,
 Android provider/namespace/local-state durability, OEM lifecycle/leak/backup и
 независимый security/format review остаются открытыми. Allowlist providers пуст.

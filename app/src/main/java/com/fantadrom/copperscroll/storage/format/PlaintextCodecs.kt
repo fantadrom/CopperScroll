@@ -86,33 +86,40 @@ object SettingsCodec {
 }
 sealed interface ObjectPayload
 object FolderPayload : ObjectPayload
-class NotePayload(val bodyBytes: Long, val chunks: List<LogicalRef>, val cursorFocusUtf16: Long) : ObjectPayload {
+class NotePayload(val bodyBytes: Long, chunks: List<LogicalRef>, val cursorFocusUtf16: Long) : ObjectPayload {
+    init { checkFormat(chunks.size <= 16,Failure.UnsupportedLimit) }
+    val chunks: List<LogicalRef> = java.util.Collections.unmodifiableList(ArrayList(chunks))
     /** Persisted value is preserved; UI can use this explicit clamp after loading the body. */
     fun clampedCursor(body: NoteBody): Int = cursorFocusUtf16.coerceAtMost(body.utf16Length.toLong()).toInt()
 }
 class MediaPayload(val mime: String, val byteLength: Long, val chunkCount: Long, val chunks: LogicalRef) : ObjectPayload
+class CardPayload(val bodyBytes: Long, chunks: List<LogicalRef>, val useAsUserTemplate: Boolean = false) : ObjectPayload {
+    init { checkFormat(chunks.size <= 4,Failure.UnsupportedLimit) }
+    val chunks: List<LogicalRef> = java.util.Collections.unmodifiableList(ArrayList(chunks))
+}
 class ObjectData(val id: Bytes, val type: Int, val parent: Bytes, val name: String,
                  val colorArgb: Long = 0xffffffffL, val icon: String, val pinned: Boolean = false,
                  val pinSequence: ULong? = null, val createdAt: Long, val contentModifiedAt: Long,
                  val metadataModifiedAt: Long, val revision: ULong = 1uL, val payload: ObjectPayload) {
-    val displayIcon: String get() = if(type == 2 && icon != "note") "note" else icon
+    val displayIcon: String get() = if(type == 2 && icon != "note") "note" else if(type == 6 && icon != "card") "card" else icon
 }
 object ObjectCodec {
     private val iconSyntax = Regex("[a-z][a-z0-9_-]{0,31}")
-    fun decode(b: ByteArray, expectedId: Bytes? = null, nextPinSequence: ULong? = null): ObjectData {
-        val a = StrictCbor.decode(b).arr(14); a[0].version()
+    fun decode(b: ByteArray, expectedId: Bytes? = null, nextPinSequence: ULong? = null, containerMinor: Int = 1): ObjectData {
+        val a = StrictCbor.decode(b).arr(14)
         val id = a[1].ident(); checkFormat(expectedId == null || id == expectedId)
-        val type = a[2].number(255).toInt(); checkFormat(type in 1..5,Failure.UnsupportedVersion)
+        val type = a[2].number(255).toInt()
+        checkFormat(if(type == 6) a[0] == 2uL && containerMinor == 2 else a[0] == 1uL && type in 1..5,Failure.UnsupportedVersion)
         val parent = a[3].ident(); checkFormat(parent != id)
-        val name = a[4].text(when(type) { 1 -> 1024; 2 -> 400; else -> Limits.PAGE })
-        if(type == 2) checkFormat(name.codePointCount(0,name.length) <= 100 && '\r' !in name && '\n' !in name)
-        if(type == 1) {
+        val name = a[4].text(when(type) { 1 -> 1024; 2,6 -> 400; else -> Limits.PAGE })
+        if(type == 2 || type == 6) checkFormat(name.codePointCount(0,name.length) <= 100 && '\r' !in name && '\n' !in name)
+        if(type == 1 || type == 6) {
             checkFormat(UCharacter.getUnicodeVersion() == VersionInfo.getInstance(16,0,0,0),Failure.UnsupportedVersion)
             checkFormat(name.codePoints().anyMatch { !UCharacter.hasBinaryProperty(it,UProperty.WHITE_SPACE) })
         }
         val color = a[5].number(0xffffffffL); val icon = a[6].text(32)
         checkFormat(iconSyntax.matches(icon))
-        if(type != 2) checkFormat(icon == listOf("","folder","note","image","audio","video")[type])
+        if(type != 2 && type != 6) checkFormat(icon == listOf("","folder","note","image","audio","video")[type])
         val pinned = a[7].bool(); val pin = a[8]?.uint()
         checkFormat(if(pinned) pin != null && pin > 0uL && (nextPinSequence == null || pin < nextPinSequence) else pin == null)
         if(type == 1) checkFormat(!pinned)
@@ -128,6 +135,14 @@ object ObjectCodec {
                 checkFormat(bytes >= refs.size && bytes <= refs.size.toLong() * Limits.CHUNK)
                 NotePayload(bytes,refs,p[3].number(0xffffffffL))
             }
+            6 -> {
+                val p = a[13].arr(4); p[0].version()
+                val bytes = p[1].number(com.fantadrom.copperscroll.storage.cards.CardLimits.BODY.toLong()); checkFormat(bytes > 0)
+                val chunks = p[2].arr(); checkFormat(chunks.size in 1..4,Failure.UnsupportedLimit)
+                val refs = chunks.mapIndexed { i,c -> ReferenceCodec.logical(c).also { it.validate(4,id,i.toLong()) } }
+                checkFormat(refs.map { it.recordId }.distinct().size == refs.size && bytes >= refs.size && bytes <= refs.size.toLong()*Limits.CHUNK)
+                checkFormat(!p[3].bool(),Failure.UnsupportedVersion); CardPayload(bytes,refs)
+            }
             else -> {
                 val p = a[13].arr(5); p[0].version()
                 val length = p[2].number(512L * 1024 * 1024 * 1024); val count = p[3].number(524288)
@@ -137,21 +152,25 @@ object ObjectCodec {
         }
         return ObjectData(id,type,parent,name,color,icon,pinned,pin,a[9].signed(),a[10].signed(),a[11].signed(),revision,payload)
     }
-    fun encode(o: ObjectData): ByteArray {
+    fun encode(o: ObjectData, containerMinor: Int = 1): ByteArray {
         val p: Any? = when(val value = o.payload) {
             FolderPayload -> null
             is NotePayload -> { checkFormat(value.chunks.size <= 16,Failure.UnsupportedLimit); listOf(1,value.bodyBytes,value.chunks.map { it.wire() },value.cursorFocusUtf16) }
             is MediaPayload -> listOf(1,value.mime,value.byteLength,value.chunkCount,value.chunks.wire())
+            is CardPayload -> listOf(1,value.bodyBytes,value.chunks.map { it.wire() },value.useAsUserTemplate)
         }
-        val b = StrictCbor.encode(listOf(1,o.id,o.type,o.parent,o.name,o.colorArgb,o.icon,o.pinned,o.pinSequence,
+        val b = StrictCbor.encode(listOf(if(o.type == 6) 2 else 1,o.id,o.type,o.parent,o.name,o.colorArgb,o.icon,o.pinned,o.pinSequence,
             o.createdAt,o.contentModifiedAt,o.metadataModifiedAt,o.revision,p))
-        decode(b); return b
+        decode(b,containerMinor=containerMinor); return b
     }
 }
 class NoteParagraph(val text: String, val checked: Boolean? = null)
 class NoteStyle(val startUtf16: Long, val endUtf16: Long, val bold: Boolean = false, val italic: Boolean = false,
                 val underline: Boolean = false, val foregroundArgb: Long? = null)
-class NoteBody(val paragraphs: List<NoteParagraph>, val styles: List<NoteStyle>) {
+class NoteBody(paragraphs: List<NoteParagraph>, styles: List<NoteStyle>) {
+    init { checkFormat(paragraphs.size <= 100000 && styles.size <= 100000,Failure.UnsupportedLimit) }
+    val paragraphs: List<NoteParagraph> = java.util.Collections.unmodifiableList(ArrayList(paragraphs))
+    val styles: List<NoteStyle> = java.util.Collections.unmodifiableList(ArrayList(styles))
     val utf16Length: Int get() = paragraphs.sumOf { it.text.length } + paragraphs.size - 1
     val text: String get() = paragraphs.joinToString("\n") { it.text }
     val fullyEmpty: Boolean get() = paragraphs.size == 1 && paragraphs[0].text.isEmpty() && paragraphs[0].checked == null

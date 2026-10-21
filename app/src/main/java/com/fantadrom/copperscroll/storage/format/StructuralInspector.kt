@@ -13,8 +13,8 @@ class InspectionLimits(val maxMapBytes: Long = 32L * 1024 * 1024, val maxRecords
 }
 class StructuralSummary(val generation: Long, val committedLength: Long, val fileLength: Long,
                         val zones: Int, val selectedSlot: Int, val checksumValidSlots: List<Boolean>,
-                        val cataloguePages: Long, val records: Long, val bytesRead: Long) {
-    override fun toString(): String = "container=1.1 generation=$generation committedLength=$committedLength fileLength=$fileLength " +
+                        val cataloguePages: Long, val records: Long, val bytesRead: Long, val minor: Int = 1) {
+    override fun toString(): String = "container=1.$minor generation=$generation committedLength=$committedLength fileLength=$fileLength " +
         "zones=$zones slot=$selectedSlot headerChecksums=$checksumValidSlots cataloguePages=$cataloguePages records=$records bytesRead=$bytesRead " +
         "cryptographicVerification=NONE durabilityVerification=NONE"
 }
@@ -81,6 +81,6 @@ object StructuralInspector {
             walk(zone.catalogue,null,true); checkFormat(foundRoot)
         }
         return StructuralSummary(header.generation,header.committedLength,source.size,header.zones.size,
-            selection.selectedSlot,selection.checksumValidSlots,pages,records,readBytes)
+            selection.selectedSlot,selection.checksumValidSlots,pages,records,readBytes,header.minor)
     }
 }
