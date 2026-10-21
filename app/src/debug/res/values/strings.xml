@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="icon_demo_title">Сравнение иконок</string>
+    <string name="icon_demo_white">Белый</string>
+    <string name="icon_demo_blue">Светло-голубой</string>
+    <string name="icon_demo_section">Иконки %1$d dp — строка от %2$d dp</string>
+    <string name="icon_demo_bank">Банковская карта</string>
+    <string name="icon_demo_passport">Паспорт для заграничных поездок</string>
+    <string name="icon_demo_papers">Журнал, газета и письма</string>
+    <string name="icon_demo_simple">Упрощённый</string>
+    <string name="icon_demo_detailed">Подробный</string>
+    <string name="icon_demo_secondary">%1$s • 21.10.2026</string>
+    <string name="icon_demo_size_description">Иконка %1$d dp</string>
+    <string name="icon_demo_actions">Действия: %1$s, %2$s, иконка %3$d dp</string>
+    <string name="icon_demo_item">Демонстрационный элемент</string>
+</resources>
