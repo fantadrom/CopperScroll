@@ -19,6 +19,21 @@ Host gate fixtures проверяют exact set, XML/protobuf/exit/run identity,
 testsuites без двойного счёта и отрицательные исходы. Source identity tests
 используют временные синтетические Git repositories, а не пользовательские файлы.
 
+Source identity regression:62 checks на Linux. Временная фикстура проверяется с
+local `core.autocrlf=false/true/input`; её `.gitattributes` содержит `* -text`,
+чтобы checkout сохранял точные исходные bytes независимо от Git EOL policy.
+Отдельная намеренно CRLF-фикстура проверяет dirty flags при Git warnings и отказ
+реального fingerprint на EOL-only change. Stderr Git не разбирается как NUL-list
+имён. Атрибуты/настройки настоящего проекта и byte hashing не нормализуются.
+
+Cleanup закрывает directory streams до удаления, снимает DOS read-only, ждёт
+завершения только созданных фикстурой процессов и ограничен её temp root.
+Try-with-resources сохраняет исходную ошибку, cleanup error становится suppressed;
+cleanup-only error также завершает задачу отказом. Итоговый PASS печатается только
+после всех cleanup/regression checks. Проверены readonly/scope/error preservation
+и остановка живого дочернего JVM. Windows file sharing/read-only enforcement
+требует нативного повторного запуска; Linux не доказывает эту ветвь Windows.
+
 [Windows / Android Studio](android-runtime-windows.md):10 runtime методов после R8,
 одна команда; P1/P2/P3 regression запускаются отдельно без P4-флага.
 

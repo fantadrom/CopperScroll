@@ -18,6 +18,13 @@
 .\gradlew.bat -Pp4ReleaseRuntime=true :app:p4ReleaseRuntimeCheck --console=plain
 ```
 
+После исправления Windows cleanup в PR №9 достаточно Pull/Gradle Sync и той же
+команды. Не исключать `testP4SourceIdentity` через `-x` и не менять глобальный
+`core.autocrlf`: синтетическая Git-фикстура теперь стабилизирует свои bytes сама.
+Если задача снова упадёт, прислать полное **первое исключение и suppressed** вместе
+с выводом команды. Cleanup больше не заменяет первичную ошибку, а PASS появляется
+только после завершения всех host checks и очистки.
+
 Команда собирает/аудирует и устанавливает два APK:
 
 - `app/build/outputs/apk/p1Release/app-p1Release.apk` — target

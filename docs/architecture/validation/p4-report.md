@@ -13,8 +13,9 @@ transaction/recovery/runtime tools и доступная концепция ре
 Коммит реализации: [`287edb035f9a84759c831a7efb996dbdc7317743`](https://github.com/fantadrom/CopperScroll/commit/287edb035f9a84759c831a7efb996dbdc7317743),
 tree `cd540cce941887d5898868e0395f8ec81e5f4ba2`.
 Публикация: [Draft PR №9](https://github.com/fantadrom/CopperScroll/pull/9),
-base master; PR не слит. Последующий коммит добавляет только эту ссылку/SHA в
-отчёт; проверенные code/build/test inputs коммита реализации не меняет.
+base master; PR не слит. Публикационный коммит `968faec8` добавил только ссылку/SHA
+в отчёт. Последующее исправление Windows host gate описано в конце отчёта;
+исторические результаты исходной APK пары ниже сохранены отдельно.
 
 **Статус: реализация и проверки агента описаны ниже; Android P4 runtime=NOT_RUN.
 Этап частично выполнен, Draft до пользовательских Honor15/эмулятор17 PASS.**
@@ -258,3 +259,85 @@ P6 providers/grants/power-loss, weak/mid-device KDF/thermal/OOM, independent sec
 review, UI/editor/lifecycle/leak/preferences integration остаются открытыми.
 Никаких реальных контейнеров/скрытой миграции/Keystore fallback/секретных previews.
 До device P4 PASS этап частичный; PR Draft, merge не выполняется.
+
+## Исправление Windows host gate —21 октября2026
+
+Продолжение в том же Draft PR №9 от head
+`968faec8ad61dc5cadbce8a585ae8879095e07c9`; актуальность/open/draft/no-merge
+проверены GitHub API. Пользовательский Terminal log SHA256:
+`708942f5ca8655cff631790c951366777d72c242c06f5f59934f8042f4cea404`.
+В нём `testP4SourceIdentity` завершился AccessDeniedException при удалении
+read-only `.git/objects/...`; BUILD FAILED, Android P4 runtime не подтверждён.
+Лог фиксирует Gradle9.6.0/JVM `25.0.3+-15898627-b508.16`, sourceDirty=true и
+wrapperModified=true; это не означает необходимость менять репозиторный wrapper.
+
+Прежний finally мог заменить первоначальное исключение ошибкой удаления.
+По предоставленному логу первичную ошибку достоверно восстановить невозможно;
+настройка core.autocrlf пользователя в нём отсутствует. Независимо воспроизведены
+две связанные проблемы старой фикстуры на Linux/Git2.52.0:
+
+- Старый `RuntimeSourceIdentityTest`: при inherited core.autocrlf=false —15 PASS,
+  при true —exit1/AssertionError. Git EOL warnings попадали из stderr в NUL-list
+  имён, из-за чего modified source мог иметь неверный sourceCodeDirty=false.
+- Без fixture attributes checkout переводит созданный LF файл в CRLF. Git может
+  считать его clean, но raw-byte fingerprint меняется. Это самостоятельная
+  причина дальнейшего отказа; clean Git status не заменяет byte fingerprint.
+
+Это воспроизведённые дефекты, не утверждение, что скрытое исключение конкретного
+Windows-прогона точно совпало с Linux AssertionError.
+
+Исправления ограничены host tooling и документацией. TemporaryRepository владеет
+только созданным им temp root/процессами. Directory stream Files.walk закрывается
+до удаления entries; DOS read-only снимается перед delete. Traversal не следует
+symlinks, нормализованный путь/его parents проверяются, внешний путь отвергается.
+Дочерние команды Git завершаются и streams закрываются; timeout/interrupt включает
+bounded termination+wait, живой процесс блокирует удаление root. Fixture hooks/
+auto-gc/maintenance/fsmonitor отключены только для этих синтетических команд.
+Глобальные Git settings/чужие temp directories не меняются и не очищаются.
+
+Try-with-resources сохраняет первоначальный Throwable (включая AssertionError),
+cleanup error добавляется suppressed. Если primary error нет, cleanup error
+остаётся ошибкой задачи. Единственный итоговый PASS расположен после закрытия
+всех repositories и завершения регрессий очистки, не внутри try перед finally.
+
+Стабильная фикстура имеет собственный `.gitattributes` с `* -text`; local
+core.autocrlf=false/true/input проверяются отдельно. Настоящий проект не получает
+эти attrs/settings. Дополнительная intentionally CRLF fixture подтверждает, что
+EOL-only change всё ещё отклоняется именно по sourceFingerprint. В production
+host `RuntimeSourceIdentity` изменено только отделение Git stderr от протокола
+stdout; raw bytes/limits/source identity comparison не ослаблены.
+
+Фактические проверки этой правки: Linux, Gradle9.6.0/JVM25.0.4.1, Java target11.
+
+```bash
+bash ./gradlew :app:testP4SourceIdentity :app:testP4RuntimeResults :app:testP1RuntimeResults :app:testP2RuntimeResults :app:testP3RuntimeResults --offline --console=plain
+GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.autocrlf GIT_CONFIG_VALUE_0=true java -cp app/build/p1-result-verifier/classes RuntimeSourceIdentityTest
+GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.autocrlf GIT_CONFIG_VALUE_0=false java -cp app/build/p1-result-verifier/classes RuntimeSourceIdentityTest
+GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.autocrlf GIT_CONFIG_VALUE_0=input java -cp app/build/p1-result-verifier/classes RuntimeSourceIdentityTest
+bash ./gradlew -Pp4ReleaseRuntime=true :app:p4ReleaseRuntimeCheck --dry-run --offline --console=plain
+bash ./gradlew :app:check --dry-run --offline --console=plain
+```
+
+Host tasks BUILD SUCCESSFUL: **141 checks PASS** (source62, P4 gate18,
+P1=33/P2=15/P3=13). Каждая из трёх дополнительных inherited-autocrlf команд дала
+62 PASS. Новые проверки включают read-only file cleanup, отказ внешнего пути,
+primary+suppressed identity, cleanup-only failure, остановку живого дочернего JVM,
+Git warnings и strict EOL-byte refusal. P4/check task graphs подтверждают
+обязательность source gate и остальных проверок; это dry-run, не Android execution.
+Нет `-x`, отключения gate, ignoreFailures или исключений dependencies.
+
+Нативного Windows запуска этой правки нет. Временная Linux filesystem поддерживает
+DOS attribute view: выполнена ветвь с setReadOnly(true), проверкой атрибута и
+cleanup; POSIX fallback в этом прогоне не использовался. Закрытие streams,
+exception semantics и завершение процесса проверены на Linux, но это не
+Windows enforcement/read-only handle-sharing. Timeout force-kill
+ветвь не выдаётся за фактически воспроизведённый Windows timeout. Изменений Android
+backend/Gradle/R8/keep rules/dependencies/wrapper нет; прежние78 JVM tests и APK
+audit выше — исторические результаты реализации, а не новые запуски этой правки.
+Полные сборки/R8/device runtime повторно не выполнялись для host-only изменения.
+
+Пользователю: Pull той же P4 ветки и прежняя команда `p4ReleaseRuntimeCheck` из
+Windows-инструкции, без ручного изменения исходников/Gradle/Git settings. Нужны
+по10 PASS на Honor15 и эмуляторе17,0 failures/errors/skipped и BUILD SUCCESSFUL
+итогового gate. При повторном отказе нужен весь primary stack и suppressed.
+Пока runtime=NOT_RUN, P4 частичный/Draft; PR №9 не сливается.

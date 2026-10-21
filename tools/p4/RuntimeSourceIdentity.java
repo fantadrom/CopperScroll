@@ -100,7 +100,8 @@ public final class RuntimeSourceIdentity {
         List<String> command=new ArrayList<>(List.of("git","-C",root.toString())); command.addAll(Arrays.asList(args));
         Path temp=Files.createTempFile("p4-source-identity-",".log");
         try {
-            Process process=new ProcessBuilder(command).redirectErrorStream(true).redirectOutput(temp.toFile()).start();
+            // Git EOL warnings belong to stderr, never to the NUL-delimited filename protocol.
+            Process process=new ProcessBuilder(command).redirectError(ProcessBuilder.Redirect.DISCARD).redirectOutput(temp.toFile()).start();
             if(!process.waitFor(30,TimeUnit.SECONDS)) { process.destroyForcibly(); process.waitFor(5,TimeUnit.SECONDS); throw new IllegalStateException("Source git command timed out"); }
             require(process.exitValue()==0 && Files.size(temp)<=4*1024*1024,"Source git command failed/oversized");
             return Files.readString(temp,StandardCharsets.UTF_8);
