@@ -34,3 +34,29 @@ with tempfile.TemporaryDirectory(prefix='p6a-isolation-') as owned:
     run(path, harness, False)
 assert original == [hashlib.sha256(p.read_bytes()).hexdigest() for p in (release, harness)]
 print('P6a isolation audit: positive + 4 negatives PASS; APKs unchanged; Android NOT_RUN')
+
+# The external provider runs under the test APK's own UID/class loader. Its manifest
+# must be present as well as its DEX definition; generic combined linkage is insufficient.
+arguments = (root / 'app/build/reports/p6a-runtime/audit-arguments.txt').read_text().splitlines()
+test_apk = Path(arguments[1])
+test_hash = hashlib.sha256(test_apk.read_bytes()).hexdigest()
+with tempfile.TemporaryDirectory(prefix='p6a-external-audit-') as owned:
+    temporary = Path(owned)
+    mutated = temporary / 'external-authority.apk'
+    with zipfile.ZipFile(test_apk) as src, zipfile.ZipFile(mutated, 'w') as dst:
+        manifest = src.read('AndroidManifest.xml')
+        modified = manifest
+        for encoding in ('utf-8', 'utf-16le'):
+            a = '.test.p6a.external.documents'.encode(encoding)
+            modified = modified.replace(a, '.test.p6a.external.invalidxx'.encode(encoding))
+        assert modified != manifest
+        for entry in src.infolist():
+            dst.writestr(entry, modified if entry.filename == 'AndroidManifest.xml' else src.read(entry))
+    args = arguments.copy()
+    args[1] = str(mutated)
+    args[3] = str(temporary / 'audit.txt')
+    args[6] = str(temporary / 'p6a-runtime')
+    p = subprocess.run([java, '-cp', classes, 'VerifyRuntimeApks', *args], capture_output=True, text=True, timeout=120)
+    assert p.returncode != 0 and 'External grant provider manifest/authority missing' in p.stderr, p.stdout + p.stderr
+assert test_hash == hashlib.sha256(test_apk.read_bytes()).hexdigest()
+print('P6a external-provider manifest negative audit PASS; APK unchanged; Android NOT_RUN')

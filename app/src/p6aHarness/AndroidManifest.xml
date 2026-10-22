@@ -1,4 +1,5 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <queries><provider android:authorities="${applicationId}.test.p6a.external.documents" /></queries>
     <application>
         <!-- DocumentsProvider.attachInfo requires exported + MANAGE_DOCUMENTS. Every data/control
              operation additionally checks the target UID; no third-party grant path is provided. -->

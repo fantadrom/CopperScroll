@@ -4,7 +4,7 @@
 [отчёт и ID-матрица](../../docs/architecture/validation/p6a-report.md).
 
 ```sh
-bash ./gradlew :app:testDebugUnitTest :app:testP1RuntimeResults :app:testP2RuntimeResults :app:testP3RuntimeResults :app:testP4RuntimeResults :app:testP4SourceIdentity :app:testP5aRuntimeResults :app:testP5bRuntimeResults :app:testP6aRuntimeResults --console=plain
+bash ./gradlew :app:testDebugUnitTest :app:testP1RuntimeResults :app:testP2RuntimeResults :app:testP3RuntimeResults :app:testP4RuntimeResults :app:testP4SourceIdentity :app:testP5aRuntimeResults :app:testP5bRuntimeResults :app:testP6aRuntimeResults :app:testP6aRuntimeDiagnostics --console=plain
 bash ./gradlew -Pp6aReleaseRuntime=true :app:verifyP6aIsolation :app:verifyP4BuildIdentity :app:lintP1Release --console=plain
 bash ./gradlew -Pp6aReleaseRuntime=true :app:p6aReleaseRuntimeCheck --console=plain
 bash ./gradlew -Pp6aReleaseRuntime=true :app:p6aProviderProbe --console=plain
@@ -19,6 +19,15 @@ suite и не production approval. Не совмещать runtime flags.
 0/partial/duplicate/failure/error/skipped/stale/missing, protobuf/runner exit и
 source provenance. Источник tools/p6a и все app/src, включая variant/provider/
 assets, входят в строгий byte fingerprint; Windows fixes P4 сохранены.
+
+20 дополнительных host checks проверяют диагностический ZIP после success/failure,
+отсутствующие/старые результаты, attempt identity, mappings, сохранение исходной
+ошибки и suppressed ошибки записи. Финализатор собирает свежие runtime результаты
+и причину отказа даже если connected завершился ошибкой; он не заменяет строгий
+gate и не создаёт runtime PASS. Доступ собственного provider определяется по
+ProviderInfo.applicationInfo.uid; внешний требует полный read/write URI-grant.
+Реальная граница разных UID проверяется synthetic provider в test APK, без второй
+копии backend или общей Kotlin-зависимости в его отдельном процессе.
 
 productionPolicy компилируется в debug/ordinary release и p1Release регрессий.
 p6aHarness подставляет policy только в явно выбранный p1Release; классы provider,

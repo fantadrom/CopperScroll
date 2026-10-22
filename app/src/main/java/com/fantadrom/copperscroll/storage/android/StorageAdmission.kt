@@ -2,6 +2,13 @@ package com.fantadrom.copperscroll.storage.android
 
 import com.fantadrom.copperscroll.storage.io.*
 
+/** Access only. External providers require ALL requested URI-grant bits, even if exported. */
+internal object SafUriAccess {
+    fun require(providerUid: Int, callerUid: Int, flags: Int, explicitGrant: (Int)->Boolean) {
+        requireIo(providerUid==callerUid || explicitGrant(flags),IoCode.AccessLost)
+    }
+}
+
 /** Observations are not durability evidence. Unknown fields never match an approved profile. */
 @ConsistentCopyVisibility
 data class StorageEnvironment internal constructor(

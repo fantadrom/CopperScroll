@@ -31,8 +31,13 @@ class SafStoreFactory(context: Context) {
         requireIo(uri.scheme=="content" && !uri.authority.isNullOrBlank() && uri.userInfo==null && uri.fragment==null,IoCode.AccessLost)
         requireIo(DocumentsContract.isDocumentUri(context,uri) || DocumentsContract.isTreeUri(uri),IoCode.AccessLost)
         val flags=Intent.FLAG_GRANT_READ_URI_PERMISSION or if(write) Intent.FLAG_GRANT_WRITE_URI_PERMISSION else 0
-        requireIo(context.checkUriPermission(uri,Process.myPid(),Process.myUid(),flags)==PackageManager.PERMISSION_GRANTED,IoCode.AccessLost)
         val provider=context.packageManager.resolveContentProvider(uri.authority!!,0) ?: throw StoreException(IoCode.AccessLost)
+        // checkUriPermission checks explicit URI grants, not the provider owner's access.
+        // Resolve the actual UID first; an authority/package-name resemblance proves nothing.
+        // These APIs exist on API31. Access never supplies any durability guarantee below.
+        SafUriAccess.require(provider.applicationInfo.uid,Process.myUid(),flags) { required ->
+            context.checkUriPermission(uri,Process.myPid(),Process.myUid(),required)==PackageManager.PERMISSION_GRANTED
+        }
         val pkg=context.packageManager.getPackageInfo(provider.packageName,0)
         val identity=ProfileAdmission.resolve(context,uri)
         val environment=StorageEnvironment(uri.authority!!,provider.packageName,pkg.longVersionCode.toString(),

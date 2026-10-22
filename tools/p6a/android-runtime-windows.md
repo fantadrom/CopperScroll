@@ -27,6 +27,11 @@ production backend в target и13 методов P6aSafRuntimeTest в test APK.
 Provider и helper работают отдельными процессами того же UID, что target;
 instrumentation исполняется с UID target. Это собственный provider, ему не
 подделывают внешний persistable grant. Проверка реальной выдачи grant — ниже.
+В test APK дополнительно находится синтетический external provider с другим UID.
+Он сам выдаёт target только read grant для проверки отказа write, затем отзывает
+его; это входит в explicitModesAndNegativeAdmission и не добавляет новых тестов
+к обязательным13. В его отдельном процессе используются только Android/Java API,
+без зависимости от Kotlin/backend из target APK.
 
 p1Release отличается от ordinary release applicationId suffix, локальной
 тестовой подписью, instrumentation ABI и тестовой policy/компонентами P6a.
@@ -58,6 +63,17 @@ Gate требует точный набор XML+protobuf+exit+freshness+APK/mapp
 Receipt: `app/build/reports/p6a-runtime/runtime-result.txt`. Сохранить его перед
 следующим runtime запуском. Диагностика: та же папка, `p1-diagnostics.zip`, оба
 mapping, APK SHA256/map IDs и build-identity. Сборка не даёт runtime PASS.
+
+При отказе connected эта же команда автоматически запускает
+collectP6aRuntimeDiagnostics. ZIP дополняется текущими XML/protobuf/exit/device
+logs, attempt/run manifest и runtime-diagnostics.txt с причиной отказа; стек
+конкретного теста сохраняется в XML. Старые результаты исключаются, отсутствие
+свежих помечается явно. Если итоговый verifier успел выполниться, его FAIL
+сохраняется в runtime-result.txt; после отказа connected этого receipt может не
+быть, это не PASS. Финализатор не подавляет BUILD FAILED и не выдаёт runtime PASS.
+При остановке всей IDE/Gradle принудительно финализатор может не выполниться:
+тогда приложить Terminal output и папку
+`app/build/outputs/androidTest-results/connected/p1Release` отдельно.
 
 ## Отдельный P6a Provider Probe
 

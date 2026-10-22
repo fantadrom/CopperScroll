@@ -13,6 +13,125 @@ Production allowlist пуста. P6a.1/P6a в целом ещё не приня�
 P5b/regression результаты прежней пары отдельно добавлены в
 [p5b-report](p5b-report.md); они не подтверждают новые adapters/APK P6a.
 
+## Исправление доступа после пользовательского прогона
+
+Перед исправлением PR13 открыт, Draft, head
+`3e7cd505bf0b9bcd7381846876defaf7cb7752da`; удалённая ветка и локальный checkout
+совпали. В присланном `p1Release.zip` на Honor ABR-LX1 Android15 и
+Virtual_Pixel_6 Android17 каждый XML содержит13 тестов,12 failures,0 errors,
+0 skipped. Единственный PASS — pickerCancellationStaleAndRequiredFlags.
+Все12 отказов каждого устройства — StoreException.AccessLost на прежней
+строке34 SafStoreFactory.inspect, проверке checkUriPermission. Терминальный
+лог (UTF-16) подтверждает BUILD FAILED connectedP1ReleaseAndroidTest.
+Это пользовательское исполнение, не прогон агента и не P6a PASS. Warnings
+Unsafe/protobuf не причина отказа. Log сообщает Gradle9.6.0/JVM25.0.3,
+sourceDirty=true/wrapperModified=true; различия не объявляются причиной ошибки.
+
+Установленная причина: checkUriPermission проверяет явно выданные URI-grants,
+но не общий доступ UID владельца provider. Контролируемый provider работает
+отдельным процессом того же UID; ему не выдавался внешний grant.
+Теперь inspect сначала разрешает ProviderInfo, сравнивает именно
+ProviderInfo.applicationInfo.uid с Process.myUid и для чужого UID требует
+checkUriPermission с полным набором READ либо READ|WRITE. Совпадение authority
+или имени package не подтверждает владение. Используются API, доступные на31;
+checkContentUriPermissionFull (только35+) не вызывается.
+
+Разрешение доступа не выдаёт ExistingWriteDurable, DurableCreateIdentity или
+DurableLocalState. AdmissionMatcher/квалификация, последующие query/FD/identity
+проверки и пустая production allowlist сохранены; даже свой provider с неизвестным
+backend остаётся readonly/отказом для изменений. R8 scope, keep rules,
+Startup/lifecycle, версии зависимостей и штатная подпись не изменены.
+
+Добавлены три JVM проверки UID/полного grant mask/независимости admission.
+В существующий explicitModesAndNegativeAdmission встроены Android проверки
+реального своего provider без explicit grant и внешнего provider, расположенного
+в test APK с другим UID: no grant → отказ чтения/записи; настоящий read-only
+grant → inspect(read), пустые durability gates, отказ write; отзыв → отказ.
+Read-only grant выдаёт сам отдельный процесс этого синтетического provider,
+с проверкой UID/signature target; instrumentation не выдаёт себе чужие права.
+Документ объявляет SUPPORTS_WRITE, чтобы read-only отказ проверял именно grant.
+Provider не содержит backend/файлов, скрыт из picker и отсутствует в target и
+обычном release. Audit проверяет его DEX/manifest/authority в test APK.
+Его код написан на Java с одними platform/Java зависимостями: собственный процесс
+test UID не имеет class loader целевого APK с общей Kotlin runtime. Audit проверяет
+реальные post-R8 references этого класса на отсутствие таких зависимостей.
+Все13 имён runtime и строгий итоговый gate сохранены.
+
+Диагностический финализатор prepare/connected/final gate теперь обновляет
+текущий p1-diagnostics.zip даже после отказа connected. Он сохраняет оба точных
+mappings/configs/APK SHA256/map IDs, попытку/run manifest, source identity,
+свежие XML/protobuf/exit/device logs и runtime-diagnostics.txt с причиной отказа.
+Ошибка утверждения и стек остаются в исходном XML. Отсутствующие/старые результаты
+помечаются, старые не включаются как свидетельство нового запуска. Если final gate
+выполнился и отказал, runtime-result.txt содержит FAIL и исходное исключение;
+ошибка записи диагностики добавляется suppressed к первоначальной ошибке.
+Финализатор не выдаёт runtime PASS и не подавляет ошибки connected/gate.
+
+Проверки исправления в Linux: полный testDebugUnitTest —157 тестов,
+0 failures/errors/skipped (26 XML suites), включая3 новых SafUriAccessTest;
+debug и debugAndroidTest APK собраны, lintDebug —0 errors/13 warnings/1 hint.
+Все host gates —239 проверок: P1=33,P2=15,P3=13,P4=18,source identity=86,
+P5a=18,P5b=18,P6a=18,диагностический архив=20. В архивных host fixtures проверены
+success, failed connected без запуска verifier, отсутствие/устаревание результатов,
+другая attempt identity, оба mappings, очистка старого PASS, первоначальное
+исключение и suppressed ошибка записи. Это не Android receipts.
+Wrapper9.6.0/JVM25.0.4.1; исходники/сборка не требуют новой версии зависимостей.
+Windows ветви read-only cleanup и новый диагностический ZIP здесь отдельно
+не исполнялись на Windows; прежние source gates остаются обязательными.
+
+Ordinary release, p1Release target и instrumentation APK после R8 собраны;
+lintP1Release —0 errors/25 warnings/1 hint. Positive APK/linkage/standalone external
+provider/обычный release isolation/source identity audits PASS. Негативные audits:
+4 isolation,1 отсутствующая external authority и8 прежних generic APK нарушений
+отвергнуты по ожидаемым причинам; подписанные APK не изменены.
+В отдельной host Gradle-фикстуре тот же порядок finalizedBy/mustRunAfter проверен
+для отказа prepare, отказа connected и полного успеха: финализатор выполняется
+во всех3 случаях, ошибки сохраняют nonzero exit/BUILD FAILED, gate не исполняется
+после отказа prerequisites. Это проверка планировщика, не Android execution.
+
+Фактические команды (общие параметры: --offline --no-daemon --no-parallel
+--max-workers=2 --console=plain):
+
+```sh
+bash gradlew :app:testP6aRuntimeDiagnostics :app:testP1RuntimeResults :app:testP6aRuntimeResults :app:testP4SourceIdentity :app:testDebugUnitTest :app:assembleDebug :app:assembleDebugAndroidTest :app:lintDebug
+bash gradlew -Pp6aReleaseRuntime=true :app:testP1RuntimeResults :app:testP2RuntimeResults :app:testP3RuntimeResults :app:testP4RuntimeResults :app:testP4SourceIdentity :app:testP5aRuntimeResults :app:testP5bRuntimeResults :app:testP6aRuntimeResults :app:testP6aRuntimeDiagnostics :app:verifyP6aIsolation :app:verifyP4BuildIdentity :app:lintP1Release
+bash gradlew -Pp6aReleaseRuntime=true :app:testP1RuntimeResults :app:testP2RuntimeResults :app:testP6aRuntimeDiagnostics :app:verifyP6aIsolation :app:verifyP4BuildIdentity
+python3 tools/p6a/check-isolation.py
+P1_AUDIT_ARGUMENTS=app/build/reports/p6a-runtime/audit-arguments.txt python3 tools/p1/check-apk-audit.py
+```
+
+Первый полный debug/JVM/lint запуск —5m52s; release/R8/lint —6m43s.
+После дополнения host диагностики отказом prepare и усиления audit (без изменения
+Android кода) повторная host/audit/source проверка —20s, PASS.
+Логи и host-фикстура планировщика сохранены в ignored work/p6a1-access-fix.
+Дополнительно выполнена сама команда `bash gradlew -Pp6aReleaseRuntime=true
+:app:p6aReleaseRuntimeCheck --console=plain` с теми же общими параметрами.
+Ожидаемый отказ подготовки: adb exit134, Cannot mkdir /home/agent/.android
+(read-only). BUILD FAILED за18s, connected не запускался. Реальный Gradle-финализатор
+после отказа prepare сохранил ZIP с обоими mappings, attempt/source identity,
+preparation-failure.txt (исходное исключение ADB) и runtime-diagnostics.txt:
+acceptance=NOT_CONFIRMED, evidence=FAIL, runtimeResults=ABSENT.
+runtime-result.txt отсутствует; старые результаты удалены. Это проверка отказа
+подготовки/архива, Android runtime исправления по-прежнему NOT_RUN.
+Подготовка APK выполнена до commit, sourceRevision — предыдущий head3e7cd505,
+sourceCodeDirty/sourceDirty=true, wrapperModified=false; это не clean build
+будущего commit. Точные пары mappings и APK связаны SHA256:
+
+```properties
+artifactBundleId=cebf293b6368dc5f207a48a1bf4847743fbe9dfa069d3f103c0384641cab4f21
+targetSha256=8f4904486c814b2e9ba63b8ba33f696dd4b02e5640b801c832628b1082c8a8cf
+testSha256=d6358e3ae1c07266691a3194625d23bb1d668e6856fa048df917b1de4a6a286c
+targetMapId=db8b893400b50b74ffec1c735722c6ab572839f4ab5a4694312cb672d83fa4f7
+testMapId=de9e28fde918e0313d39822c14a5579c1111cb4dc21eae3140b9889e7fc76987
+sourceFingerprint=1cdfb09277b28cb34ee5776ee9db27aebc6e8b878e264cee730faa173ffc6629
+runtime=NOT_RUN
+```
+
+Для подтверждения исправления нужны новые13 PASS на каждом Honor15/emulator17
+с прежней единой командой из Windows инструкции. Присланные12 failures не закрывают
+приёмку. Production admission/P6a.2/P6b/P6c и отдельная регрессионная матрица
+остаются открытыми; Draft PR13 не сливается.
+
 ## API, FD и исключение второго writer
 
 [SafStoreFactory](../../../app/src/main/java/com/fantadrom/copperscroll/storage/android/SafStoreFactory.kt)
@@ -149,7 +268,7 @@ keys на restart нет.
 | --- | --- | --- | --- |
 | SAF-01 | explicitModesAndNegativeAdmission; createTransactionCopyCompactRekey | Build/host, Android NOT_RUN | Двухустройственный adapter runtime; real provider qualification |
 | SAF-02 | readOnlyPipeVirtualAndStaleMetadata; positionalShortInterruptedAndErrorIo; negative policy | JVM gate model PASS; Android NOT_RUN | Реальные grants/cloud/provider и аппаратная IO модель |
-| SAF-03, DUR-04 | grantLossReplacementAndProfileMismatch; exact environment matcher | JVM dimension tests PASS; Android NOT_RUN | Реальные revoke/reinstall/move, provider/OS обновления |
+| SAF-03, DUR-04 | grantLossReplacementAndProfileMismatch; explicitModesAndNegativeAdmission (different UID/no grant/read grant/revoke); exact environment matcher | JVM dimension/access tests PASS; исправленные Android NOT_RUN | Реальные revoke/reinstall/move, provider/OS обновления |
 | DUR-01/02 | dataForceDoesNotPublishNamespaceAndUnknownCreate; P3/P5 fault regressions | Host model; Android NOT_RUN | Controlled interruption и physical namespace/media durability |
 | DUR-03 | noBackupPublicationFaultsAndWholeRecords; corruptLostAndVersionedLocalStateNeverReset | Codec/model regression; Android NOT_RUN | Реальные metadata syscall faults/restart/power interruption |
 | TX-02/05, LIFE-06 | aliasInterprocessLocksAndContinuousReopen; blockingIoRevokeRetainsOwnerUntilQuiescence | JVM continuous lease PASS; Android NOT_RUN | Два процесса на обоих устройствах; реальные зависшие syscalls/OEM |

@@ -20,6 +20,7 @@ public final class VerifyRuntimeApks {
     private static final String ICU = "com/ibm/icu/impl/data/";
     private static final String TEST = "Lcom/fantadrom/copperscroll/storage/runtime/P1BackendRuntimeTest;";
     private static final List<String> BACKEND = List.of(
+        "Lcom/fantadrom/copperscroll/storage/android/SafUriAccess;",
         "Lcom/fantadrom/copperscroll/storage/android/AndroidSafStore;",
         "Lcom/fantadrom/copperscroll/storage/android/SafStoreFactory;",
         "Lcom/fantadrom/copperscroll/storage/android/AppPrivateLocalState;",
@@ -51,6 +52,7 @@ public final class VerifyRuntimeApks {
                 for(String type:List.of("AndroidSafStore","SafStoreFactory","AppPrivateLocalState"))
                     require(real.containsKey("Lcom/fantadrom/copperscroll/storage/android/"+type+";"),"Android adapter missing from ordinary release: "+type);
                 require(real.keySet().stream().noneMatch(n->n.startsWith("Lcom/fantadrom/copperscroll/p6aharness/")),"Test controls/provider/helper leaked into ordinary release");
+                require(!real.containsKey("Lcom/fantadrom/copperscroll/storage/runtime/ExternalGrantDocumentsProvider;"),"External test provider leaked into ordinary release");
                 byte[] manifest=release.getInputStream(release.getEntry("AndroidManifest.xml")).readAllBytes();
                 require(!new String(manifest,StandardCharsets.UTF_8).contains("p6aharness") && !new String(manifest,StandardCharsets.UTF_16LE).contains("p6aharness"),"Harness manifest leaked into ordinary release");
                 for(String type:List.of("ControlledDocumentsProvider","P6aHelperService","P6aProviderProbeActivity","HarnessFaults"))
@@ -106,6 +108,22 @@ public final class VerifyRuntimeApks {
             require(!appClasses.contains(p6aSuite),"P6a suite duplicated in target");
             if(p6a) {
                 require(testClasses.contains(p6aSuite),"P6a suite missing from test APK");
+                String external="Lcom/fantadrom/copperscroll/storage/runtime/ExternalGrantDocumentsProvider;";
+                require(testClasses.contains(external) && !appClasses.contains(external),"External grant provider must belong to the distinct test APK only");
+                // A separately launched test-UID provider cannot use the target's shared Kotlin
+                // runtime. Audit its real post-R8 code, not just the combined instrumentation loader.
+                for(var edge:testIndex.edges) if(edge.caller.equals(external)) {
+                    List<String> types=new ArrayList<>();
+                    if(edge.type!=null) types.add(edge.type);
+                    if(edge.member!=null) { types.add(edge.member.owner); types.addAll(edge.member.types); }
+                    for(String t:types) {
+                        while(t.startsWith("[")) t=t.substring(1);
+                        require(!t.startsWith("L") || t.equals(external) || t.startsWith("Landroid/") || t.startsWith("Ljava/"),"External grant provider requires nonplatform class outside its standalone loader: "+t);
+                    }
+                }
+                byte[] manifestBytes=tests.getInputStream(tests.getEntry("AndroidManifest.xml")).readAllBytes();
+                String testManifest=new String(manifestBytes,StandardCharsets.UTF_16LE)+new String(manifestBytes,StandardCharsets.UTF_8);
+                require(testManifest.contains("ExternalGrantDocumentsProvider") && testManifest.contains(".test.p6a.external.documents") && testManifest.contains("MANAGE_DOCUMENTS"),"External grant provider manifest/authority missing");
                 for(String method:List.of("explicitModesAndNegativeAdmission","createTransactionCopyCompactRekey","readOnlyPipeVirtualAndStaleMetadata","grantLossReplacementAndProfileMismatch","positionalShortInterruptedAndErrorIo","dataForceDoesNotPublishNamespaceAndUnknownCreate","noBackupPublicationFaultsAndWholeRecords","aliasInterprocessLocksAndContinuousReopen","blockingIoRevokeRetainsOwnerUntilQuiescence","processRestartLocalLockAndBoundGenerationProgress","pickerCancellationStaleAndRequiredFlags","corruptLostAndVersionedLocalStateNeverReset","switchRevocationLostAckAndDistinctRecoveryCredentials"))
                     require((testIndex.classes.get(p6aSuite).methods.getOrDefault(method+"()V",0)&1)!=0,"P6a runtime method missing: "+method);
                 for(String type:List.of("ControlledDocumentsProvider","P6aHelperService","P6aProviderProbeActivity","HarnessFaults"))

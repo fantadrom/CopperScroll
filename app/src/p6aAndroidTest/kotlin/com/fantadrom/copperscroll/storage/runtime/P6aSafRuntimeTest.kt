@@ -3,6 +3,7 @@ package com.fantadrom.copperscroll.storage.runtime
 import android.app.Activity
 import android.content.Intent
 import android.content.pm.ApplicationInfo
+import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Bundle
 import android.os.Process
@@ -65,6 +66,12 @@ class P6aSafRuntimeTest {
     @After fun clearFaults() { HarnessFaults.clear() }
 
     @Test fun explicitModesAndNegativeAdmission() {
+        val own=context.packageManager.resolveContentProvider(authority,0)!!
+        check(own.applicationInfo.uid==Process.myUid())
+        check(context.checkUriPermission(root("a"),Process.myPid(),Process.myUid(),
+            Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)==PackageManager.PERMISSION_DENIED)
+        factory.inspect(root("a"),true) // Owner, no explicit grant: real separate provider process.
+        externalGrantAccess()
         val a=seeded()
         check(control("count").getInt("creates")==1)
         val before=control("count").getInt("creates")
@@ -82,6 +89,24 @@ class P6aSafRuntimeTest {
         factory.openOriginal(Uri.parse(a.uri),true).let { check(!it.writable && !it.store.guarantees.existingWriteDurable); it.store.close() }
         reject { factory.openOriginal(DocumentsContract.buildDocumentUri(authority,"a:"+UUID.randomUUID())) }
         check(before==control("count").getInt("creates"))
+    }
+    private fun externalGrantAccess() {
+        val external=InstrumentationRegistry.getInstrumentation().context.packageName+".p6a.external.documents"
+        val uri=DocumentsContract.buildDocumentUri(external,"synthetic")
+        check(context.packageManager.resolveContentProvider(external,0)!!.applicationInfo.uid!=Process.myUid())
+        fun grant(value: String) { context.contentResolver.call(Uri.parse("content://$external"),"p6a.grant",value,null)!! }
+        fun denied(write: Boolean) {
+            check((reject { factory.inspect(uri,write) } as StoreException).code==IoCode.AccessLost)
+        }
+        grant("none")
+        try {
+            denied(false); denied(true)
+            grant("read")
+            check(context.checkUriPermission(uri,Process.myPid(),Process.myUid(),Intent.FLAG_GRANT_READ_URI_PERMISSION)==PackageManager.PERMISSION_GRANTED)
+            check(factory.inspect(uri).decision.granted.isEmpty()) // Read access is not durability.
+            denied(true) // Metadata advertises write; a read-only grant still cannot authorize it.
+        } finally { grant("none") }
+        denied(false)
     }
     @Test fun createTransactionCopyCompactRekey() {
         val (a,s)=created()
