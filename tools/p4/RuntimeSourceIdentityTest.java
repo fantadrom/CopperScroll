@@ -36,7 +36,7 @@ public final class RuntimeSourceIdentityTest {
             Files.writeString(root.resolve("app/src/main/java/Synthetic.java"),"class Synthetic {}\n");
             Files.writeString(root.resolve("gradle/wrapper/gradle-wrapper.properties"),"distributionUrl=synthetic-9.6.0\n");
             Files.write(root.resolve("gradle/wrapper/gradle-wrapper.jar"),new byte[]{1,2,3});
-            Files.writeString(root.resolve(".gitignore"),"work/\napp/src/main/java/Ignored.java\n");
+            Files.writeString(root.resolve(".gitignore"),"work/\napp/src/main/java/Ignored.java\ntools/p6a/Ignored.java\n");
             // This synthetic repository requires exact bytes, independent of the user's Git EOL policy.
             // Never add these attributes/settings to the real project or normalize its fingerprint.
             Files.writeString(root.resolve(".gitattributes"),"* -text\n");
@@ -69,6 +69,12 @@ public final class RuntimeSourceIdentityTest {
             check(ignored.getProperty("sourceCodeDirty").equals("true") && ignored.getProperty("workingTreeDirty").equals("false"));
             reject(()->RuntimeSourceIdentity.verify(root,identity));
             Files.delete(root.resolve("app/src/main/java/Ignored.java"));
+            for(String input:List.of("tools/p6a/Ignored.java","app/src/p6aHarness/kotlin/Provider.kt",
+                "app/src/p6aAndroidTest/assets/synthetic.txt","app/src/productionPolicy/kotlin/Policy.kt")) {
+                Path added=root.resolve(input); Files.createDirectories(added.getParent()); Files.writeString(added,"synthetic input\n");
+                check(!RuntimeSourceIdentity.capture(root,"9.6.0","synthetic-jvm-A","synthetic-vendor").getProperty("sourceFingerprint").equals(clean.getProperty("sourceFingerprint")));
+                reject(()->RuntimeSourceIdentity.verify(root,identity)); Files.delete(added);
+            }
             Files.writeString(root.resolve("work/unrelated.txt"),"synthetic unrelated data\n");
             check(RuntimeSourceIdentity.capture(root,"9.6.0","synthetic-jvm-A","synthetic-vendor").getProperty("sourceFingerprint").equals(clean.getProperty("sourceFingerprint")));
             RuntimeSourceIdentity.verify(root,identity); checks++;

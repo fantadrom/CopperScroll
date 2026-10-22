@@ -30,7 +30,11 @@ public final class VerifyRuntimeResults {
         "cborUnknownEnumsAndIndependentGolden", "rejectsNoncanonicalGolden", "all21SyntheticS1GoldenVectors");
     static String reportDirectory = "p1-runtime";
     static void configure(String profile) {
-        require(profile.equals("p2") || profile.equals("p2-benchmark") || profile.equals("p3") || profile.equals("p4") || profile.equals("p5a") || profile.equals("p5b"), "Unknown runtime profile");
+        require(profile.equals("p2") || profile.equals("p2-benchmark") || profile.equals("p3") || profile.equals("p4") || profile.equals("p5a") || profile.equals("p5b") || profile.equals("p6a"), "Unknown runtime profile");
+        if(profile.equals("p6a")) {
+            reportDirectory="p6a-runtime"; SUITE="com.fantadrom.copperscroll.storage.runtime.P6aSafRuntimeTest";
+            EXPECTED=Set.of("explicitModesAndNegativeAdmission","createTransactionCopyCompactRekey","readOnlyPipeVirtualAndStaleMetadata","grantLossReplacementAndProfileMismatch","positionalShortInterruptedAndErrorIo","dataForceDoesNotPublishNamespaceAndUnknownCreate","noBackupPublicationFaultsAndWholeRecords","aliasInterprocessLocksAndContinuousReopen","blockingIoRevokeRetainsOwnerUntilQuiescence","processRestartLocalLockAndBoundGenerationProgress","pickerCancellationStaleAndRequiredFlags","corruptLostAndVersionedLocalStateNeverReset","switchRevocationLostAckAndDistinctRecoveryCredentials"); return;
+        }
         if(profile.equals("p5b")) {
             reportDirectory="p5b-runtime"; SUITE="com.fantadrom.copperscroll.storage.runtime.P5bChangeSecretRuntimeTest";
             EXPECTED=Set.of("mainOnlyAndCompatibility","mainRekeyPreservesDecoy","decoyRekeyPreservesMain",
@@ -88,7 +92,7 @@ public final class VerifyRuntimeResults {
     static void prepare(Path build, String adb) throws Exception {
         // This task is unconditionally executed BEFORE connected, never a cached input/output check.
         clearPreviousResults(build);
-        if((reportDirectory.equals("p4-runtime") || reportDirectory.equals("p5a-runtime") || reportDirectory.equals("p5b-runtime"))) RuntimeSourceIdentity.verify(build.getParent().getParent(),sourceIdentity(build));
+        if((reportDirectory.equals("p4-runtime") || reportDirectory.equals("p5a-runtime") || reportDirectory.equals("p5b-runtime") || reportDirectory.equals("p6a-runtime"))) RuntimeSourceIdentity.verify(build.getParent().getParent(),sourceIdentity(build));
         Map<String, String> devices = snapshot(adb, System.getenv("ANDROID_SERIAL"));
         saveManifest(manifest(build), devices);
         bindArtifacts(build);
@@ -115,7 +119,7 @@ public final class VerifyRuntimeResults {
             String value = artifacts.getProperty(field, ""); require(!value.isBlank(), "Missing artifact identity: " + field);
             run.setProperty(field, value);
         }
-        if((reportDirectory.equals("p4-runtime") || reportDirectory.equals("p5a-runtime") || reportDirectory.equals("p5b-runtime"))) {
+        if((reportDirectory.equals("p4-runtime") || reportDirectory.equals("p5a-runtime") || reportDirectory.equals("p5b-runtime") || reportDirectory.equals("p6a-runtime"))) {
             Properties identity=RuntimeSourceIdentity.read(sourceIdentity(build));
             for(String field:RuntimeSourceIdentity.FIELDS) run.setProperty(field,identity.getProperty(field));
             run.setProperty("sourceIdentitySha256",sourceIdentityHash(build));
@@ -128,7 +132,7 @@ public final class VerifyRuntimeResults {
         require(artifacts.getProperty("mappingMarkers", "").equals("PASS"), "APK/mapping diagnostic mismatch");
         for (String field : ARTIFACT_FIELDS) require(!run.getProperty(field, "").isBlank() &&
             run.getProperty(field).equals(artifacts.getProperty(field)), "Artifacts changed during runtime run: " + field);
-        if((reportDirectory.equals("p4-runtime") || reportDirectory.equals("p5a-runtime") || reportDirectory.equals("p5b-runtime"))) {
+        if((reportDirectory.equals("p4-runtime") || reportDirectory.equals("p5a-runtime") || reportDirectory.equals("p5b-runtime") || reportDirectory.equals("p6a-runtime"))) {
             RuntimeSourceIdentity.verify(build.getParent().getParent(),sourceIdentity(build));
             Properties identity=RuntimeSourceIdentity.read(sourceIdentity(build));
             for(String field:RuntimeSourceIdentity.FIELDS) require(identity.getProperty(field).equals(run.getProperty(field)),"Source identity changed: "+field);
@@ -263,7 +267,7 @@ public final class VerifyRuntimeResults {
             .append(run.getProperty("runId")).append("\n");
         for (String field : ARTIFACT_FIELDS) if (run.containsKey(field))
             summary.append(field).append('=').append(run.getProperty(field)).append('\n');
-        if((reportDirectory.equals("p4-runtime") || reportDirectory.equals("p5a-runtime") || reportDirectory.equals("p5b-runtime"))) {
+        if((reportDirectory.equals("p4-runtime") || reportDirectory.equals("p5a-runtime") || reportDirectory.equals("p5b-runtime") || reportDirectory.equals("p6a-runtime"))) {
             for(String field:RuntimeSourceIdentity.FIELDS) {
                 require(!run.getProperty(field,"").isBlank(),"Missing build/source provenance: "+field);
                 summary.append(field).append('=').append(run.getProperty(field)).append('\n');

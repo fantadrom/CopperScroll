@@ -12,7 +12,7 @@ Git tree `91362a64afd5bba516d951792d5099e566f1bf6f`; последующий comm
 AGENTS.md в репозитории/родителях не найден. Прочитаны design/format/resolution/
 test/prototype/P4 extension, P1–P5a reports и соответствующий engine/runtime code.
 
-Статус: headless реализация и synthetic/model проверки; **Android агента NOT_RUN**.
+Статус: headless реализация, synthetic/model проверки и пользовательские Android-прогоны подтверждены (см. дополнение от 22 октября ниже); **Android агента NOT_RUN**.
 Новые пользовательские runtime P5b и регрессии P1–P5a обязательны до приёмки.
 Пользовательское подтверждение прежнего P5a из results.zip добавлено отдельной
 датированной записью в [p5a-report.md](p5a-report.md), не выдано за новый прогон.
@@ -303,3 +303,33 @@ androidx/kotlin/kotlinx optimization scope. PASS не byte/runtime identity об
 release и не provider certification. Нужны новые пользовательские P5b+регрессии;
 до них P5b не принят и PR Draft. Production SAF/profiles, физический power-loss,
 Android lifecycle/OEM/leaks, рабочий UI/persistence и ordinary release runtime — P6.
+
+## Пользовательское подтверждение от 22 октября 2026
+
+Согласно подтверждению пользователя и сведениям из ТЗ P6a.1, шесть receipts
+`P5b_results.zip` ранее проверены в чате. SourceRevision:
+`2ec28bf8c458ace5b283a2fe6aad84872df7c3a1`. На каждом из Honor ABR-LX1 Android15
+и эмулятора Android17: P5b/P1/P2/P3/P4/P5a соответственно **8/7/8/8/10/8 PASS**,
+failures/errors/skipped=0; всего98. Это пользовательское выполнение на Windows,
+не Android-исполнение агента. Raw XML в архиве отсутствовал; независимая повторная
+проверка raw XML не заявляется. Подтверждены runtime gates этой APK-пары;
+SAF/provider/power-loss/lifecycle/OEM/полная security review остаются отдельными gates.
+
+```properties
+artifactBundleId=56f5257ce4f4a1aa88cf29dcdb145c0e4de5fc7dfeadcc40e5115e04247a986e
+p5bRunId=33d05211-e38a-4c62-9916-54cbb8bf53b2
+sourceFingerprint=59306de5566341a3a63299f9629c3ec66e851cf5ea402eaee4c1c219010350b5
+gradleVersion=9.6.0
+jvmVersion=25.0.3+-15898627-b508.16
+jvmVendor=JetBrains
+sourceCodeDirty=false
+sourceDirty=true
+workingTreeDirty=true
+wrapperModified=true
+```
+
+Все шесть receipts связаны с указанным artifactBundleId. Сохраняются прежние
+ограничения p1Release относительно ordinary release: suffix/test signature/ABI,
+частичная R8 scope; storage/ICU/CBOR/crypto вне optimization. Исторические
+`Android агента NOT_RUN` и результаты сборок выше остаются историческими.
+Они не переименованы в agent PASS; новые P6a APK требуют новых прогонов.
