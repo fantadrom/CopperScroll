@@ -5,6 +5,10 @@
 Содержит P1–P4, Windows fix `ff4981f`, icon demo. Рабочее дерево было чистым,
 AGENTS.md в репозитории/родителях не найден. Ветка
 `codex/copper-scroll-p5a-copy-compaction`, отдельный Draft PR в master, без merge.
+Опубликован [Draft PR №11](https://github.com/fantadrom/CopperScroll/pull/11).
+Реализация: commit `9942e45c7aa5569dff4fe8cfda061ef6853b85f4`,
+Git tree `941192c024dae36dfc46acf980dda120a8785dba`; последующий commit
+добавляет только эту публикационную запись. Master не изменён.
 Прочитаны design/format/resolution/test/prototype/P4-extension, актуальные P1–P4
 reports, IO/owner/local state/T/VFS/reader/recovery и runtime gates.
 
