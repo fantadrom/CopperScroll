@@ -1,0 +1,11 @@
+<component name="ProjectRunConfigurationManager">
+  <configuration default="false" name="P5b Release Runtime" type="GradleRunConfiguration" factoryName="Gradle">
+    <ExternalSystemSettings>
+      <option name="externalProjectPath" value="$PROJECT_DIR$" />
+      <option name="externalSystemIdString" value="GRADLE" />
+      <option name="scriptParameters" value="-Pp5bReleaseRuntime=true --console=plain" />
+      <option name="taskNames"><list><option value=":app:p5bReleaseRuntimeCheck" /></list></option>
+    </ExternalSystemSettings>
+    <method v="2" />
+  </configuration>
+</component>

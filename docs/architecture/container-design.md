@@ -1,8 +1,8 @@
 # Copper Scroll: архитектура защищённого контейнера
 
 Статус: базовая спецификация1.1 и явное [расширение P4/1.2](container-p4-extension.md).
-P1…P4 имеют пользовательские Android runtime receipts. Headless P5a copy/compact
-реализован; [новые runtime gates](validation/p5a-report.md) ещё открыты. Правила карточек/совместимости/лимитов
+P1…P5a имеют пользовательские Android runtime receipts. Headless P5b ChangeSecret
+реализован; [новые runtime gates](validation/p5b-report.md) ещё открыты. Правила карточек/совместимости/лимитов
 из расширения имеют приоритет над ограничениями базового reader1.1 ниже.
 Дата: 18 октября 2026. Нормативный формат: [container-format-v1.md](container-format-v1.md).
 Проверки: [container-test-plan.md](container-test-plan.md). Задание разработчику:
@@ -469,6 +469,18 @@ writer запрещён. Подтверждённый source либо Activated 
 явно; отменённый/unverified candidate не становится активным сам. Source и
 verified backup сохраняются при всех отказах; cleanup только собственных
 незавершённых artifacts по journal, не единственной здоровой копии.
+
+Уточнение P5b (22 октября2026): ChangeSecret использует тот же автомат и local
+codec2 (kind=rekey, singleton target), без изменения container1.1/1.2. Recovery
+явно разделяет source/candidate credentials: для source/backup нужен old target,
+для candidate — new target и authority main соответствующего документа.
+Wrong/missing credentials не выбирают другой URI и не replay-ят build.
+SetPreferredInputMethod остаётся отдельным local noBackup port без rekey.
+Проверяется existingWriteDurable и durableCreateIdentity каждого backup/candidate
+FD, в том числе после reopen; namespace guarantee сама по себе не data durability.
+Слабый adapter не получает VerifiedCopy/Activated (отдельный fault boundary test).
+
+Реализация, матрица и границы — [отчёт P5b](validation/p5b-report.md).
 
 ### 8.6. Место и версии
 

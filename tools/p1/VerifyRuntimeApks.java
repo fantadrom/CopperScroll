@@ -85,6 +85,13 @@ public final class VerifyRuntimeApks {
                     "namespaceAndLocalStateDurability", "catalogueSplitsAndLimits", "boundedStoreAndConflict"))
                 require((testIndex.classes.get(p3Suite).methods.getOrDefault(method+"()V",0) & 1) != 0,
                     "P3 expected runtime method missing: " + method);
+            String p5bSuite="Lcom/fantadrom/copperscroll/storage/runtime/P5bChangeSecretRuntimeTest;";
+            require(testClasses.contains(p5bSuite) && !appClasses.contains(p5bSuite),"P5b suite must belong to test APK only");
+            for(String method:List.of("mainOnlyAndCompatibility","mainRekeyPreservesDecoy","decoyRekeyPreservesMain",
+                "credentialsAndNoArtifacts","oldKeyCannotReadRekeyOrFutureTransactions","revokeSwitchAndLease",
+                "restartWithDistinctCredentialContexts","preferredInputAndRepeatedChange"))
+                require((testIndex.classes.get(p5bSuite).methods.getOrDefault(method+"()V",0)&1)!=0,"P5b expected runtime method missing: "+method);
+            require(appClasses.contains("Lcom/fantadrom/copperscroll/storage/maintenance/RekeyBuilder;"),"Rekey builder missing from target");
             String p5aSuite="Lcom/fantadrom/copperscroll/storage/runtime/P5aMaintenanceRuntimeTest;";
             require(testClasses.contains(p5aSuite) && !appClasses.contains(p5aSuite),"P5a suite must belong to test APK only");
             for(String method:List.of("selectiveZonesAndIndependentReaders","authorizationCredentialsAndNoEffects",

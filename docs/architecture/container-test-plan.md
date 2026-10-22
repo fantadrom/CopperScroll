@@ -23,6 +23,10 @@
 | TEMPLATE-02 P1 | Global dismiss/reset, иной message/zone/container | Только один warning ID, без content/zone IDs в prefs, zone settings прежние |
 | CARD-06 P0 | VFS/note/card/batch/media fault matrix и randomized oracle | Whole old/new либо честный Unknown; чужая зона/ciphertext неизменны |
 
+Текущие результаты P5b и границы model/device gates:
+[отчёт P5b](validation/p5b-report.md). Исторические P1–P5a receipts не заменяют
+свежую проверку новой APK-пары; нормативные IDs ниже сохранены.
+
 ## 1. Стенд и критерий приёмки
 
 Два слоя: чистый JVM codec/engine на RandomAccessStore с fault injection и

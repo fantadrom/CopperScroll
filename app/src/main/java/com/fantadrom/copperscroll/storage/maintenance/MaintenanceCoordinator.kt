@@ -9,23 +9,46 @@ import com.fantadrom.copperscroll.storage.transaction.TransactionCore
 enum class MaintenanceStep { AuthorizeMain, Destinations, Credentials, Confirm, DrainAndFreeze, Preflight,
     Backup, BuildCandidate, VerifyCandidate, PrepareSwitch, AcceptSwitch, ResolveAndClose }
 enum class MaintenanceCode { MaintenanceCommitted, Denied, Cancelled, SetupRequired, CredentialsRejected,
-    Conflict, AccessLost, Busy, Unsupported, ResourceLimit, IoFailure, CopyUnknown, SwitchUnknown, NeedsCredentials }
+    Conflict, AccessLost, Busy, Unsupported, ResourceLimit, IoFailure, CopyUnknown, SwitchUnknown, NeedsCredentials, UnchangedSecret, SecretMismatch }
 class MaintenanceRefusal(val code: MaintenanceCode) : Exception(code.name)
 class MaintenanceDestinations(val source: Artifact, val backup: String, val candidate: String)
-class CompactionRequest internal constructor(internal val issuer: Any, internal val capability: TransactionCore.MaintenanceCapability,
+sealed class MaintenanceRequest protected constructor(internal val issuer: Any, internal val capability: TransactionCore.MaintenanceCapability,
     val opId: Bytes, internal val ticket: Any, val destinations: MaintenanceDestinations, selected: Set<Bytes>, internal val source: DocumentFingerprint,
     internal val snapshot: ReadSnapshot, internal val previousBinding: DocumentFingerprint) {
+    abstract val kind: String
+    open val targetZoneId: Bytes? = null
     val selected: Set<Bytes> = java.util.Collections.unmodifiableSet(HashSet(selected))
     override fun toString() = "CompactionRequest(redacted)"
 }
+class CompactionRequest internal constructor(issuer: Any, capability: TransactionCore.MaintenanceCapability,
+    opId: Bytes, ticket: Any, destinations: MaintenanceDestinations, selected: Set<Bytes>, source: DocumentFingerprint,
+    snapshot: ReadSnapshot, previousBinding: DocumentFingerprint) : MaintenanceRequest(issuer,capability,opId,ticket,
+        destinations,selected,source,snapshot,previousBinding) { override val kind = "compact" }
+class ChangeSecretRequest internal constructor(issuer: Any, capability: TransactionCore.MaintenanceCapability,
+    opId: Bytes, ticket: Any, destinations: MaintenanceDestinations, override val targetZoneId: Bytes,
+    source: DocumentFingerprint, snapshot: ReadSnapshot, previousBinding: DocumentFingerprint,
+    val inputMethod: Int, val hint: String, val parameters: KdfParameters, internal val otherKnownCorrupt: Boolean) :
+    MaintenanceRequest(issuer,capability,opId,ticket,destinations,setOf(targetZoneId),source,snapshot,previousBinding) {
+    override val kind = "rekey"
+    val targetRole = snapshot.header.zones.single { it.zoneId == targetZoneId }.role
+    override fun toString() = "ChangeSecretRequest(redacted)"
+}
 /** RAM-only service context. No repository/UI handle is exposed. Closing invalidates confirmations. */
-class MaintenanceProposal internal constructor(internal val request: CompactionRequest, internal val decoy: CurrentCredential?,
-    val maximumCandidateBytes: Long, val additionalBytesRequired: Long) : AutoCloseable {
+class MaintenanceProposal internal constructor(internal val request: MaintenanceRequest, internal val currentTarget: CurrentCredential?,
+    val maximumCandidateBytes: Long, val additionalBytesRequired: Long, internal val prepared: PreparedZone? = null) : AutoCloseable {
     @Volatile internal var closed = false
     internal var onClose: ()->Unit = {}
     internal var confirmed = false
     internal var consumed = false
-    @Synchronized override fun close() { if(!closed) { closed = true; try { decoy?.close() } finally { onClose() } } }
+    @Synchronized override fun close() {
+        if(closed) return
+        closed = true; var failure: Throwable? = null
+        for(resource in listOfNotNull(currentTarget,prepared)) try { resource.close() } catch(e: Throwable) {
+            if(failure == null) failure = e else failure!!.addSuppressed(e)
+        }
+        try { onClose() } catch(e: Throwable) { if(failure == null) failure = e else failure!!.addSuppressed(e) }
+        failure?.let { throw it }
+    }
     override fun toString() = "MaintenanceProposal(redacted)"
 }
 class MaintenanceConfirmation internal constructor(internal val proposal: MaintenanceProposal)
@@ -33,7 +56,8 @@ class MaintenanceResult internal constructor(val code: MaintenanceCode, val stag
     val source: Artifact, val backup: VerifiedCopy?, val candidate: Artifact?, val sizes: MaintenanceSizes?,
     coverage: Map<Bytes,VerificationCoverage>, val sourceFingerprint: DocumentFingerprint,
     val candidateFingerprint: DocumentFingerprint?, retained: List<Artifact>, unverified: List<Artifact>, val outcome: JournalOutcome,
-    internal val failure: Throwable? = null) {
+    internal val failure: Throwable? = null, val kind: String = "compact", val targetZoneId: Bytes? = null) {
+    val retainedFilesKeepOldProtection = kind == "rekey"
     val selected = java.util.Collections.unmodifiableSet(HashSet(selected))
     val processed = if(code == MaintenanceCode.MaintenanceCommitted) this.selected else emptySet()
     val coverage = java.util.Collections.unmodifiableMap(HashMap(coverage))
@@ -48,13 +72,20 @@ class MaintenanceResult internal constructor(val code: MaintenanceCode, val stag
  * Observers are test/progress notifications only; they cannot supply authorization or accept a switch.
  */
 class MaintenanceCoordinator internal constructor(private val core: TransactionCore, private val documents: MaintenanceDocuments,
-    private val local: LocalStateStore, private val credentialManager: CredentialManager, private val progress: (MaintenanceStep)->Unit) {
+    private val local: LocalStateStore, private val credentialManager: CredentialManager, private val progress: (MaintenanceStep)->Unit, private val rekeyRecords: RecordCrypto = RecordCrypto()) {
     constructor(core: TransactionCore, documents: MaintenanceDocuments, local: LocalStateStore,
                 progress: (MaintenanceStep)->Unit = {}) : this(core,documents,local,CredentialManager(),progress)
     private val issuer = Any()
     private var pinnedCandidate: ResourceOwner? = null
     fun begin(capability: TransactionCore.MaintenanceCapability, destinations: MaintenanceDestinations,
-              selection: Set<Bytes>? = null): CompactionRequest {
+              selection: Set<Bytes>? = null): CompactionRequest = beginRequest(capability,destinations,selection,null) as CompactionRequest
+    fun beginChangeSecret(capability: TransactionCore.MaintenanceCapability, destinations: MaintenanceDestinations,
+        targetZoneId: Bytes, inputMethod: Int, hint: String? = null, parameters: KdfParameters = KdfParameters(),
+        otherKnownCorrupt: Boolean = false): ChangeSecretRequest = beginRequest(capability,destinations,setOf(targetZoneId),
+            ChangeOptions(targetZoneId,inputMethod,hint,parameters,otherKnownCorrupt)) as ChangeSecretRequest
+    private class ChangeOptions(val target: Bytes,val method: Int,val hint: String?,val parameters: KdfParameters,val corrupt: Boolean)
+    private fun beginRequest(capability: TransactionCore.MaintenanceCapability, destinations: MaintenanceDestinations,
+        selection: Set<Bytes>?, change: ChangeOptions?): MaintenanceRequest {
         try { return preparation(capability) { s,_,_,permit ->
         // capability checked by core before any callbacks, grants, KDF, naming or artifacts.
         progress(MaintenanceStep.AuthorizeMain); core.owner.check(permit)
@@ -67,12 +98,21 @@ class MaintenanceCoordinator internal constructor(private val core: TransactionC
         refuse(selected.isNotEmpty() && selected.all { id -> s.header.zones.any { it.zoneId == id } },MaintenanceCode.Unsupported)
         val fp = fingerprint(core.owner.store,destinations.source.uri,s,check={ core.owner.check(permit) })
         val state = local.read()
-        if(local.reconciliationRequired || (state.journal != null && (state.journal.stage !in listOf(JournalStage.Activated,JournalStage.Aborted) ||
+        if(local.reconciliationRequired || (state.journal != null && (state.journal.kind !in setOf("compact","rekey") || state.journal.stage !in listOf(JournalStage.Activated,JournalStage.Aborted) ||
             state.journal.outcome == JournalOutcome.Unreported))) {
             core.owner.markUnknown(); core.owner.revoke(); throw MaintenanceRefusal(MaintenanceCode.SwitchUnknown)
         }
         refuse(sameBindingDocument(state.binding,fp),MaintenanceCode.Conflict)
-        CompactionRequest(issuer,capability,randomId(),ticket,destinations,selected,fp,s,state.binding!!)
+        if(change == null) CompactionRequest(issuer,capability,randomId(),ticket,destinations,selected,fp,s,state.binding!!)
+        else {
+            refuse(change.method in 1..4,MaintenanceCode.Unsupported)
+            try { change.parameters.validate() } catch(e: CryptoException) { throw MaintenanceRefusal(credentialFailure(e)) }
+            val target = s.header.zones.single { it.zoneId == change.target }
+            val requestedHint = change.hint ?: target.hint
+            checkFormat(utf8(requestedHint).size <= 512,Failure.ValidationError)
+            ChangeSecretRequest(issuer,capability,randomId(),ticket,destinations,change.target,fp,s,state.binding!!,
+                change.method,requestedHint,change.parameters,change.corrupt)
+        }
         } } catch(e: MaintenanceRefusal) {
             if(e.code == MaintenanceCode.SetupRequired) try { core.owner.release() } catch(cleanup: Throwable) { e.addSuppressed(cleanup) }
             throw e
@@ -104,33 +144,75 @@ class MaintenanceCoordinator internal constructor(private val core: TransactionC
                 try { progress(MaintenanceStep.Confirm) } catch(e: Throwable) { proposal.close(); throw e }
                 proposal.also { ticket = null }
             } catch(e: CryptoException) {
-                throw MaintenanceRefusal(when(e.failure) {
-                    CryptoFailure.Cancelled -> MaintenanceCode.Cancelled
-                    CryptoFailure.ResourceLimit -> MaintenanceCode.ResourceLimit
-                    CryptoFailure.UnsupportedKdf,CryptoFailure.UnsupportedSecretEncoding,CryptoFailure.InvalidParameters -> MaintenanceCode.Unsupported
-                    else -> MaintenanceCode.CredentialsRejected
-                })
+                throw MaintenanceRefusal(credentialFailure(e))
             } finally { ticket?.close() }
+        }
+    }
+    /** All three S1 handles are caller-owned, never retained. The independently unwrapped old
+     * target and prepared new target handles belong exclusively to the operation proposal. */
+    fun credentials(request: ChangeSecretRequest, currentSecret: CanonicalSecret?, newSecret: CanonicalSecret?,
+                    repeated: CanonicalSecret?): MaintenanceProposal {
+        refuse(request.issuer === issuer,MaintenanceCode.Denied)
+        return preparation(request.capability,admission={ core.checkMaintenanceTicket(request.ticket) }) { s,main,reader,permit ->
+            core.setMaintenanceContext(request.ticket,null)
+            fresh(request,s); progress(MaintenanceStep.Credentials); core.owner.check(permit)
+            refuse(currentSecret != null && newSecret != null && repeated != null,MaintenanceCode.Cancelled)
+            var current: CurrentCredential? = null; var prepared: PreparedZone? = null
+            try {
+                val d = s.header.zones.single { it.zoneId == request.targetZoneId }
+                current = credentialManager.verifyCurrent(s.header.containerId,d,d.zoneId,d.role,currentSecret!!,
+                    main.takeIf { it.zoneId == d.zoneId },CryptoCancellation { core.owner.accessRevoked })
+                refuse(!reader.openZone(s,current.key).readOnly,MaintenanceCode.Unsupported)
+                prepared = credentialManager.prepareChange(current,d,newSecret!!,repeated!!,request.inputMethod,
+                    s.header.zones.singleOrNull { it.zoneId != d.zoneId },request.otherKnownCorrupt,request.parameters,
+                    CryptoCancellation { core.owner.accessRevoked })
+                // prepareChange has consumed old S1 only AFTER same-own and inequality checks.
+                core.owner.check(permit)
+                val bound = s.header.committedLength+s.catalogues.sumOf { it.size.toLong()*Limits.PAGE }+131072
+                val proposal = MaintenanceProposal(request,current,bound,Math.addExact(s.header.committedLength,bound)+RESERVE,prepared)
+                proposal.onClose = { core.owner.retire(proposal) }
+                core.setMaintenanceContext(request.ticket,proposal)
+                current = null; prepared = null // transfer before invoking any observer
+                try { progress(MaintenanceStep.Confirm) } catch(e: Throwable) { proposal.close(); throw e }
+                proposal
+            } catch(e: CryptoException) { throw MaintenanceRefusal(credentialFailure(e)) }
+            finally { try { current?.close() } finally { prepared?.close() } }
         }
     }
     /** Explicit final consent, bound by object identity to this op/selection/destinations/S/space.
      * No mutable flags or dismiss-forever setting. Late confirmations cannot resume closed sessions. */
     fun confirm(proposal: MaintenanceProposal): MaintenanceConfirmation {
         refuse(proposal.request.issuer === issuer,MaintenanceCode.Denied)
-        return preparation(proposal.request.capability,admission={ core.checkMaintenanceTicket(proposal.request.ticket,proposal) }) { s,_,_,_ ->
-            fresh(proposal.request,s)
-            synchronized(proposal) {
-                refuse(!proposal.closed && !proposal.confirmed && !proposal.consumed,MaintenanceCode.Denied)
-                proposal.confirmed = true; MaintenanceConfirmation(proposal)
+        try {
+            return preparation(proposal.request.capability,admission={ core.checkMaintenanceTicket(proposal.request.ticket,proposal) }) { s,_,_,_ ->
+                fresh(proposal.request,s)
+                synchronized(proposal) {
+                    refuse(!proposal.closed && !proposal.confirmed && !proposal.consumed,MaintenanceCode.Denied)
+                    proposal.confirmed = true; MaintenanceConfirmation(proposal)
+                }
             }
+        } catch(e: Throwable) {
+            if((e is MaintenanceRefusal && e.code == MaintenanceCode.Conflict) || (e is StoreException && e.code == IoCode.InvalidRange))
+                try { proposal.close() } catch(cleanup: Throwable) { e.addSuppressed(cleanup) }
+            throw e
         }
     }
-    fun compact(confirmation: MaintenanceConfirmation): MaintenanceResult {
+    fun compact(confirmation: MaintenanceConfirmation): MaintenanceResult = execute(confirmation,"compact")
+    fun changeSecret(confirmation: MaintenanceConfirmation): MaintenanceResult = execute(confirmation,"rekey")
+    private fun execute(confirmation: MaintenanceConfirmation, kind: String): MaintenanceResult {
         val p = confirmation.proposal; val r = p.request
-        refuse(r.issuer === issuer,MaintenanceCode.Denied)
-        core.checkMaintenanceTicket(r.ticket,p)
-        synchronized(p) {
-            refuse(!p.closed && p.confirmed && !p.consumed,MaintenanceCode.Denied); p.consumed = true
+        refuse(r.issuer === issuer && r.kind == kind,MaintenanceCode.Denied)
+        try {
+            core.checkMaintenanceTicket(r.ticket,p)
+            synchronized(p) {
+                refuse(!p.closed && p.confirmed && !p.consumed,MaintenanceCode.Denied); p.consumed = true
+            }
+        } catch(e: Throwable) {
+            // Revoke before dispatch is already quiescent unless a different live IO owns the
+            // permit. release() then returns false; never close its FD or a newer request.
+            if(core.owner.revokeRequested && !core.owner.reconciliationRequired)
+                try { core.owner.release() } catch(cleanup: Throwable) { e.addSuppressed(cleanup) }
+            throw e
         }
         var stage: JournalStage? = null; var backup: VerifiedCopy? = null; var candidate: Artifact? = null
         var candidateFp: DocumentFingerprint? = null; var pendingArtifact: OwnedArtifactIdentity? = null
@@ -141,7 +223,7 @@ class MaintenanceCoordinator internal constructor(private val core: TransactionC
         val ownUnverified = ArrayList<Artifact>()
         val removed = HashSet<Artifact>()
         fun publish(next: JournalStage) {
-            val journal = StateJournal(r.opId,"compact",r.selected.sorted(),r.source,backup?.fingerprint,candidateFp,
+            val journal = StateJournal(r.opId,r.kind,r.selected.sorted(),r.source,backup?.fingerprint,candidateFp,
                 next,r.previousBinding,if(next == JournalStage.Activated) { if(core.owner.switchUnreported) JournalOutcome.Unreported else JournalOutcome.Confirmed } else JournalOutcome.Pending,pendingArtifact)
             when(local.replace(LocalState(if(next == JournalStage.Activated) candidateFp else r.previousBinding,journal))) {
                 LocalWriteCode.Committed -> stage = next
@@ -163,10 +245,11 @@ class MaintenanceCoordinator internal constructor(private val core: TransactionC
                 refuse(sameFingerprint(local.read().binding,r.previousBinding),MaintenanceCode.Conflict)
                 progress(MaintenanceStep.Preflight)
                 val keys = HashMap<Bytes,ZoneKey>()
-                if(main.zoneId in r.selected) keys[main.zoneId] = main
-                p.decoy?.let { keys[it.key.zoneId] = it.key }
+                if(r is CompactionRequest && main.zoneId in r.selected) keys[main.zoneId] = main
+                p.currentTarget?.let { keys[it.key.zoneId] = it.key }
                 val compactor = SelectiveCompactor()
                 val plan = compactor.preflight(core.owner.store,s,r.selected,keys,check)
+                val rekey = (r as? ChangeSecretRequest)?.let { RekeyBuilder(rekeyRecords).also { builder -> builder.validate(plan,it.targetZoneId) } }
                 val backupFree = documents.availableBytes(r.destinations.backup)
                 val candidateFree = documents.availableBytes(r.destinations.candidate)
                 // Both budgets independently reserve worst combined usage (safe also for same underlying volume).
@@ -189,12 +272,17 @@ class MaintenanceCoordinator internal constructor(private val core: TransactionC
                 pendingArtifact = OwnedArtifactIdentity(artifact.uri,artifact.identity); publish(JournalStage.Building)
                 val cp = owned.accept()
                 owned.execute(cp) {
-                    val instance = compactor.build(core.owner.store,plan,owned.store,check)
+                    requireDurableArtifact(owned.store)
+                    val instance = if(rekey == null) compactor.build(core.owner.store,plan,owned.store,check)
+                    else rekey.build(core.owner.store,plan,owned.store,p.currentTarget!!.key,p.prepared!!,(r as ChangeSecretRequest).hint,check)
                     check(); progress(MaintenanceStep.VerifyCandidate)
-                    requireIo(owned.store.guarantees.durableCreateIdentity,IoCode.UnsupportedDurability)
+                    requireDurableArtifact(owned.store)
                     owned.store.force(); check(); owned.store.forceIdentity()
                     owned.reopen(cp) { documents.open(artifact) }
-                    coverage = compactor.verify(core.owner.store,plan,owned.store,instance,keys,check)
+                    requireDurableArtifact(owned.store)
+                    coverage = if(rekey == null) compactor.verify(core.owner.store,plan,owned.store,instance,keys,check)
+                    else rekey.verify(core.owner.store,plan,owned.store,instance,p.currentTarget!!.key,p.prepared!!.key,
+                        p.prepared.envelope,(r as ChangeSecretRequest).hint,check)
                     candidateFp = fingerprint(owned.store,artifact.uri,check=check)
                     documents.checkIdentity(artifact)
                     requireFingerprint(r.source,core.owner.store,check)
@@ -247,7 +335,7 @@ class MaintenanceCoordinator internal constructor(private val core: TransactionC
             if(!core.owner.reconciliationRequired) {
                 if(code != MaintenanceCode.MaintenanceCommitted && stage != null) {
                     try {
-                        val state = LocalState(r.previousBinding,StateJournal(r.opId,"compact",r.selected.sorted(),r.source,backup?.fingerprint,candidateFp,
+                        val state = LocalState(r.previousBinding,StateJournal(r.opId,r.kind,r.selected.sorted(),r.source,backup?.fingerprint,candidateFp,
                             JournalStage.Aborted,r.previousBinding,JournalOutcome.Aborted,pendingArtifact))
                         if(local.replace(state) != LocalWriteCode.Committed) { core.owner.markUnknown(); code = MaintenanceCode.SwitchUnknown }
                         else stage = JournalStage.Aborted
@@ -281,7 +369,7 @@ class MaintenanceCoordinator internal constructor(private val core: TransactionC
             ownUnverified.filter { it !in removed },
             if(core.owner.reconciliationRequired) JournalOutcome.Unknown else if(stage == JournalStage.Activated) {
                 if(unreported) JournalOutcome.Unreported else JournalOutcome.Confirmed
-            } else JournalOutcome.Aborted,failure)
+            } else JournalOutcome.Aborted,failure,r.kind,r.targetZoneId)
     }
     /** Standalone low-level backup checks only the authenticated open zone. It grants no compact
      * capability; user command authorization stays at the main coordinator boundary. */
@@ -292,6 +380,10 @@ class MaintenanceCoordinator internal constructor(private val core: TransactionC
         }
     fun reconcile(choice: RecoveryChoice, secrets: Map<Bytes,CanonicalSecret>): RecoveryResult =
         MaintenanceRecovery().resolve(local,documents,choice,secrets,
+            if(core.owner.phase != OwnerPhase.Released) core.owner else null,
+            pinnedCandidate?.takeIf { it.phase != OwnerPhase.Released })
+    fun reconcileChangeSecret(choice: RecoveryChoice, credentials: RekeyRecoveryCredentials): RecoveryResult =
+        MaintenanceRecovery().resolveChangeSecret(local,documents,choice,credentials,
             if(core.owner.phase != OwnerPhase.Released) core.owner else null,
             pinnedCandidate?.takeIf { it.phase != OwnerPhase.Released })
     private fun <T> preparation(capability: TransactionCore.MaintenanceCapability, admission: ()->Unit = {},
@@ -314,7 +406,7 @@ class MaintenanceCoordinator internal constructor(private val core: TransactionC
             throw e
         }
     }
-    private fun fresh(r: CompactionRequest,s: ReadSnapshot) {
+    private fun fresh(r: MaintenanceRequest,s: ReadSnapshot) {
         refuse(sameSnapshot(r.snapshot,s),MaintenanceCode.Conflict)
         requireFingerprint(r.source,core.owner.store) { refuse(!core.owner.accessRevoked,MaintenanceCode.Cancelled) }
     }
@@ -337,4 +429,16 @@ internal fun classify(e: Throwable): MaintenanceCode = when(e) {
     }
     is OutOfMemoryError -> MaintenanceCode.ResourceLimit
     else -> MaintenanceCode.IoFailure
+}
+
+internal fun credentialFailure(e: CryptoException): MaintenanceCode = when(e.failure) {
+    CryptoFailure.Cancelled -> MaintenanceCode.Cancelled
+    CryptoFailure.ResourceLimit -> MaintenanceCode.ResourceLimit
+    CryptoFailure.Busy -> MaintenanceCode.Busy
+    CryptoFailure.RngFailure,CryptoFailure.Collision,CryptoFailure.BackendUnavailable -> MaintenanceCode.IoFailure
+    CryptoFailure.Closed -> MaintenanceCode.Denied
+    CryptoFailure.UnchangedSecret -> MaintenanceCode.UnchangedSecret
+    CryptoFailure.SecretMismatch -> MaintenanceCode.SecretMismatch
+    CryptoFailure.UnsupportedKdf,CryptoFailure.UnsupportedSecretEncoding,CryptoFailure.InvalidParameters -> MaintenanceCode.Unsupported
+    else -> MaintenanceCode.CredentialsRejected
 }

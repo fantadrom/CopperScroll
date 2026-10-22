@@ -89,3 +89,9 @@ internal fun sameBindingDocument(binding: DocumentFingerprint?, current: Documen
     binding != null && binding.identity != null && binding.uri == current.uri && binding.identity == current.identity &&
         binding.container == current.container && binding.instance == current.instance && current.generation >= binding.generation &&
         (current.generation != binding.generation || sameFingerprint(binding,current))
+
+/** A durable namespace alone does not certify file data. Check the actual opened artifact too,
+ * including after reopen; a weaker adapter must never receive VerifiedCopy/Activated. */
+internal fun requireDurableArtifact(store: RandomAccessStore) {
+    requireIo(store.guarantees.existingWriteDurable && store.guarantees.durableCreateIdentity,IoCode.UnsupportedDurability)
+}
