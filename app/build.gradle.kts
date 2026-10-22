@@ -1,3 +1,6 @@
+import java.util.UUID
+import java.util.zip.ZipOutputStream
+import java.util.zip.ZipEntry
 import com.android.build.api.artifact.ScopedArtifact
 import com.android.build.api.variant.ScopedArtifacts
 
@@ -155,7 +158,8 @@ val compileP1ResultVerifier = tasks.register<JavaCompile>("compileP1ResultVerifi
         rootProject.file("tools/p1/RuntimeDiagnostics.java"),rootProject.file("tools/p6a/RuntimeDiagnosticsTest.java"),
         rootProject.file("tools/p2/VerifyP2RuntimeResultsTest.java"), rootProject.file("tools/p3/VerifyP3RuntimeResultsTest.java"),
         rootProject.file("tools/p4/RuntimeSourceIdentity.java"),rootProject.file("tools/p4/VerifyP4RuntimeResultsTest.java"),
-        rootProject.file("tools/p4/RuntimeSourceIdentityTest.java"),rootProject.file("tools/p5a/VerifyP5aRuntimeResultsTest.java"),rootProject.file("tools/p5b/VerifyP5bRuntimeResultsTest.java"),rootProject.file("tools/p6a/VerifyP6aRuntimeResultsTest.java"),rootProject.file("tools/p6a/ProviderProbeController.java"))
+        rootProject.file("tools/p4/RuntimeSourceIdentityTest.java"),rootProject.file("tools/p5a/VerifyP5aRuntimeResultsTest.java"),rootProject.file("tools/p5b/VerifyP5bRuntimeResultsTest.java"),rootProject.file("tools/p6a/VerifyP6aRuntimeResultsTest.java"),rootProject.file("tools/p6a/ProviderProbeController.java"),
+        rootProject.file("tools/p6a2/QualificationLedger.java"),rootProject.file("tools/p6a2/QualificationController.java"),rootProject.file("tools/p6a2/QualificationLedgerTest.java"))
     classpath = p1ResultProtocol
     destinationDirectory.set(layout.buildDirectory.dir("p1-result-verifier/classes"))
     options.release.set(11)
@@ -226,6 +230,15 @@ val testP6aRuntimeResults = tasks.register<JavaExec>("testP6aRuntimeResults") {
     mainClass.set("VerifyP6aRuntimeResultsTest")
 }
 tasks.named("check") { dependsOn(testP6aRuntimeResults) }
+val testP6a2Qualification = tasks.register<JavaExec>("testP6a2Qualification") {
+    group = "verification"
+    dependsOn(compileP1ResultVerifier)
+    classpath = files(compileP1ResultVerifier.flatMap { it.destinationDirectory },p1ResultProtocol)
+    mainClass.set("QualificationLedgerTest")
+    args(rootProject.projectDir.absolutePath)
+}
+tasks.named("check") { dependsOn(testP6a2Qualification) }
+
 
 if (p1ReleaseRuntime) {
     val p4IdentityFile = layout.buildDirectory.file("reports/$runtimeReports/build-identity.properties")
@@ -362,6 +375,55 @@ if (p1ReleaseRuntime) {
             mainClass.set("VerifyRuntimeApks")
             args("--p6a-isolation",layout.buildDirectory.file("outputs/apk/release/app-release-unsigned.apk").get().asFile.absolutePath,
                 layout.buildDirectory.file("outputs/apk/p1Release/app-p1Release.apk").get().asFile.absolutePath)
+        }
+        // Build failures happen before the host controller can start. Capture this invocation's
+        // FIRST failed task even then; old audit/runtime artifacts are explicitly excluded.
+        val qualificationRequested = gradle.startParameter.taskNames.any { name -> listOf("p6a2ProcessQualification","p6a2RebootPrepare","p6a2RebootResume").any { name.endsWith(it) } }
+        val qualificationAttempt = UUID.randomUUID().toString()
+        val qualificationDiagnostics = if(qualificationRequested) tasks.register("collectP6a2BuildDiagnostics") {
+            notCompatibleWithConfigurationCache("Collects failed task states for this explicit diagnostic invocation")
+            doLast {
+                val directory=layout.buildDirectory.dir("reports/p6a2-build-attempts/$qualificationAttempt").get().asFile
+                directory.mkdirs()
+                val failed=gradle.taskGraph.allTasks.filter { it.state.failure!=null }
+                val text=buildString {
+                    appendLine("attemptId=$qualificationAttempt")
+                    appendLine("AndroidRuntime=NOT_INFERRED_FROM_BUILD")
+                    appendLine("failedTaskCount=${failed.size}")
+                    failed.forEach { appendLine("task=${it.path}"); appendLine(it.state.failure!!.stackTraceToString().take(32768)) }
+                    val audited=tasks.named("verifyP1ReleaseApks").get().state
+                    if(audited.executed && audited.failure==null && audited.didWork) {
+                        val zip=layout.buildDirectory.file("reports/p6a-runtime/p1-diagnostics.zip").get().asFile
+                        if(zip.isFile) zip.copyTo(directory.resolve("current-artifact-diagnostics.zip"),overwrite=true)
+                        appendLine("artifactEvidence=CURRENT_AUDIT_ONLY")
+                    } else appendLine("artifactEvidence=NOT_AVAILABLE_CURRENT_AUDIT_DID_NOT_PASS")
+                }
+                directory.resolve("build-diagnostics.txt").writeText(text)
+                val archive=directory.resolve("build-diagnostics.zip")
+                ZipOutputStream(archive.outputStream()).use { zip ->
+                    directory.listFiles()!!.filter { it!=archive && it.isFile }.forEach { file ->
+                        zip.putNextEntry(ZipEntry(file.name)); file.inputStream().use { it.copyTo(zip) }; zip.closeEntry()
+                    }
+                }
+                logger.lifecycle("P6a.2 build diagnostics: ${archive.absolutePath}")
+            }
+        } else null
+        if(qualificationDiagnostics!=null) {
+            qualificationDiagnostics.configure { mustRunAfter(tasks.matching { it.name!="collectP6a2BuildDiagnostics" }) }
+            tasks.matching { it.name!="collectP6a2BuildDiagnostics" }.configureEach {
+                finalizedBy(qualificationDiagnostics)
+            }
+        }
+        for ((name,mode) in mapOf("p6a2ProcessQualification" to "process", "p6a2RebootPrepare" to "rebootPrepare", "p6a2RebootResume" to "rebootResume")) {
+            tasks.register<JavaExec>(name) {
+                group = "verification"
+                dependsOn(verifyP1ReleaseApks,checkNotNull(verifyP4BuildIdentity),"verifyP6aIsolation",testP6a2Qualification,testP4SourceIdentity)
+                classpath = files(compileP1ResultVerifier.flatMap { it.destinationDirectory },p1ResultProtocol)
+                if(qualificationDiagnostics!=null) finalizedBy(qualificationDiagnostics)
+                mainClass.set("QualificationController")
+                args(mode,layout.buildDirectory.get().asFile.absolutePath,androidComponents.sdkComponents.adb.get().asFile.absolutePath,
+                    providers.gradleProperty("p6a2RunId").orElse("new").get())
+            }
         }
         tasks.register<JavaExec>("p6aProviderProbe") {
             group = "verification"

@@ -27,6 +27,12 @@
 [отчёт P5b](validation/p5b-report.md). Исторические P1–P5a receipts не заменяют
 свежую проверку новой APK-пары; нормативные IDs ниже сохранены.
 
+P6a.1 принят пользователем22.10.2026; [исторические receipts](validation/p6a-report.md).
+[P6a.2 research](storage-provider-qualification.md) и [ветви normative ID/evidence/status](validation/p6a2-report.md)
+разделяют model, process death, orderly reboot и power/storage interruption. Новые
+qualification prepare/recover пары не заменяют13-method P6a correctness suite,
+не повышают observed syscall в production guarantee и не закрывают весь SAF/DUR/MAINT ID.
+
 ## 1. Стенд и критерий приёмки
 
 Два слоя: чистый JVM codec/engine на RandomAccessStore с fault injection и

@@ -1,0 +1,11 @@
+<component name="ProjectRunConfigurationManager">
+  <configuration default="false" name="P6a2 Process Qualification" type="GradleRunConfiguration" factoryName="Gradle">
+    <ExternalSystemSettings>
+      <option name="externalProjectPath" value="$PROJECT_DIR$" />
+      <option name="externalSystemIdString" value="GRADLE" />
+      <option name="scriptParameters" value="-Pp6aReleaseRuntime=true --no-configuration-cache --console=plain" />
+      <option name="taskNames"><list><option value=":app:p6a2ProcessQualification" /></list></option>
+    </ExternalSystemSettings>
+    <method v="2" />
+  </configuration>
+</component>

@@ -78,6 +78,8 @@ class P6aSafRuntimeTest {
         factory.inspect(root("a"),true) // Owner, no explicit grant: real separate provider process.
         externalGrantAccess()
         val a=seeded()
+        check((reject { factory.deleteOwned(a) } as StoreException).code==IoCode.UnsupportedDurability)
+        factory.openRequired(Uri.parse(a.uri)).use { check(it.size>131072) }
         check(control("count").getInt("creates")==1)
         val before=control("count").getInt("creates")
         ResourceOwner(factory.openRequired(Uri.parse(a.uri))).use { owner ->

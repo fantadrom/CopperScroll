@@ -91,9 +91,10 @@ class SafStoreFactory(context: Context) {
     private val owned=HashMap<String,StoreIdentity>()
     internal fun deleteOwned(artifact: Artifact) {
         requireIo(owned[artifact.uri]==artifact.identity,IoCode.AccessLost)
-        checkIdentity(artifact)
-        AndroidIo.call { requireIo(DocumentsContract.deleteDocument(resolver,artifact.uri.toUri()),IoCode.Eio) }
-        owned.remove(artifact.uri)
+        // SAF deleteDocument has no compare-identity argument. Even a qualified write/create
+        // contract cannot close the checkIdentity -> unlink replacement race. Retain until a
+        // separately reviewed atomic compare-and-delete implementation exists for this backend.
+        throw StoreException(IoCode.UnsupportedDurability)
     }
     internal fun checkIdentity(a: Artifact) {
         val i=inspect(a.uri.toUri(),true); i.decision.require(StorageGuarantee.ExistingWriteDurable)
