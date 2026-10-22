@@ -12,6 +12,143 @@ P6a.1 **принят пользователем**, [отдельная запи�
 исследование/инструменты; новый Android runtime не наследует прежний PASS.
 **Production admission REFUSED, allowlist пуста; общий P6a открыт.**
 
+## Диагностика prepareWorker после пользовательского process experiment
+
+Перед изменением fetch/API подтвердили head `501ed72f4ec6c044101fc748f7a651b0cf30da50`,
+тот же Draft PR14, open/не merged. Пользователь сообщил успешные проверки до P5b;
+новый qualification ZIP не содержит их отдельных runtime receipts/XML, поэтому это
+зафиксировано как сообщение пользователя, без переименования в собственный прогон
+агента или доказательство новой полной regression-матрицы.
+
+В предоставленном qualification-diagnostics.zip hostRunId
+`a2d48aef-89c0-4d38-ba7e-6a9dd38ed43e`, sourceRevision=501ed72f4ec6c044101fc748f7a651b0cf30da50,
+sourceCodeDirty=false, sourceDirty/workingTreeDirty=true, wrapperModified=true.
+Windows: Gradle9.6.0, JetBrains JVM25.0.3+-15898627-b508.16. Artifact bundle
+`8865e2c1b21412a6de03712e95fb8456b3f783ea158601f6f4ef13d7fd085565`,
+target/test SHA256 соответственно
+`94288e92c0c093d8b50c4ac106a1738b5824a6cce19114f3eb1b9305de4ba929` /
+`f06cb494b904de13536850601ff136041e577769772e0f9f090c64be460047fd`.
+Exact mappings сохранены в архиве; test map ID
+`e54fb96e471b535cf1aa1b61180c651f41db500beed7b1fad496225693ff80cd`
+совпадает со стеком. Retrace именно этим test mapping подтвердил
+P6aQualificationController.prepare:44 / prepareWorker:55 — check ответа, не helper
+verifyBytes. Target mapping не подставлялся вместо test mapping.
+
+Honor ABR-LX1 Android15: prepareWorker и recoverWorker успешно завершены, по одному
+точному completed status0 + OK(1 test) и корректному receipt. PID15931→16030,
+новая worker session, bootCount45 прежний; совпали scope/bytes/local record/identity
+observations, productionAdmission=REFUSED. Это **пользовательский** успешный process
+experiment прежней APK-пары, не power loss и не production qualification.
+
+Эмулятор: prepareWorker failed до принудительного завершения helper; recoverWorker
+не запускался. Декодированный status2 receipt содержит только method=prepareWorker,
+status=error, failureType=IllegalStateException, pid29744, checkpointPhase=PREPARED.
+Изначального helper stack, runId и нарушенного условия нет. Видимый стек — последующий
+check ответа в instrumentation. Нельзя установить, отказали mode/size/hash/identity,
+или предполагать, что причиной является конкретная гарантия эмулятора. Итог FAIL
+сохранён, неизвестная причина не считается PASS.
+
+Установлены именно дефекты диагностики: общий service catch терял helper stack;
+terminal gate выбрасывал исключение до сохранения receipt; checkpoint PREPARED
+записывался до verifyBytes, а host phase оставалась NOT_STARTED. На успешном пути
+host также не переносил свежие PID/session/checkpoint из recovery receipt в ledger.
+
+Исправления ограничены opt-in harness, instrumentation, host tools и документацией:
+
+- verifyBytes сохраняет прежние строгие условия и различает VERIFY_MODE, VERIFY_SIZE,
+  VERIFY_HASH, VERIFY_IDENTITY; дополнительные stage-коды обозначают open/read/close,
+  local-state и checkpoint операции. Выводятся только флаги режима/число grants,
+  expected/observed size, результаты hash/device/inode сравнений. Raw fstat identity,
+  URI, содержимое/его digest и exception messages не публикуются.
+- Helper перехватывает ошибку внутри qualification operation до общего service catch,
+  передаёт runId, исходные source frames первичной ошибки, cause/suppressed topology.
+  Диагностика ограничена4 throwable nodes/6 frames на узел с явным truncation;
+  имена class/method/file фильтруются. Вторичный отказ чтения checkpoint не заменяет
+  первичную ошибку. Вторая IPC-команда status больше не может скрыть готовый ответ.
+- PREPARED checkpoint сохраняется до verifyBytes, с preparationVerified=false.
+  Только после всех проверок и закрытия ресурсов forced checkpoint получает true;
+  recovery требует этот marker. Host preparationCompleted=true требует ещё и
+  успешный строгий prepare method gate; lost ACK/ошибка runner не подтверждают метод.
+- `<method>-helper-response.properties` сохраняется перед terminal gate, также при
+  failed runner/неполном command output. Missing/malformed ответ получает отдельный
+  unavailable-файл. Чужие method/runId не меняют ledger; whitelist запрещает ответу
+  менять source/artifact/policy/completedMethods. Обычный method receipt и прежние
+  exact count/class/method/runner-exit/freshness проверки сохраняются.
+- phase=PREPARATION_FAILED + checkpointPhase=PREPARED + completedMethods=0 корректно
+  описывают исходный отказ; preparationVerified/preparationCompleted различимы.
+  Recovery failure не выдаёт второй completed method даже при checkpoint RECOVERED;
+  successful recovery обновляет публичные checkpoint/PID/session. Старый unverified
+  reboot checkpoint новой сборкой не возобновляется.
+
+Production backend, grant/admission/delete policies, три UNKNOWN gates/пустая allowlist,
+все13 correctness методов, R8/keep rules/optimization scope, версии и обычный UI
+не изменены. Ограничения p1Release относительно обычного release сохраняются ниже.
+[Windows инструкция](../../../tools/p6a2/android-qualification-windows.md) содержит
+прежнюю единую команду и новые диагностические файлы. Исправление делает следующий
+отказ объяснимым; причину конкретного emulator invariant ещё нужно получить новым
+Android прогоном. Runtime новой сборки **NOT_RUN агента**.
+
+Проверки этого диагностического изменения агентом (Linux):6 новых JVM tests,
+0 failures/errors/skipped;278 host checks (148 qualification +18 runtime result +
+20 diagnostics +92 source identity) PASS. Новые fixtures проверяют четыре причины
+verifyBytes, прежний успешный check при следующем отказе, original/cause/suppressed
+frames, закрытие ресурса с первичным отказом, отсутствие private messages/URI и фильтрацию frames,
+циклы/лимиты; на host — сохранение failed receipt до gate, неполученный/чужой/duplicate
+ответ, checkpoint без completed method, lost ACK, сохранение policy/source и свежие
+recovery observations. Старые zero/partial/skip/crash/count/exit negatives остаются.
+Полный162-test fault suite здесь повторно не исполнялся: production алгоритмы и
+модели отказов не менялись; его исторический результат ниже сохранён отдельно.
+
+Debug/debugAndroidTest собраны; lintDebug0 errors/13 warnings/1 hint. Ordinary
+release/p1Release/test APK после R8 собраны, lintRelease0 errors/15 warnings/1 hint,
+lintP1Release0 errors/26 warnings/1 hint. APK audit дополнительно требует
+QualificationDiagnostics только в opt-in target; все13 runtime методов и4 явных
+qualification метода присутствуют, backend только в target, mappings обоих APK
+связаны с SHA256. Повторно отклонены8 generic APK negatives и7 isolation/authority/ACL
+negatives; исходные подписанные APK не изменены. Docs validator:51 links/anchors,
+28 tables,116 IDs,13 resolution rows; diff whitespace PASS. R8/keep scope не расширялся
+ради диагностического результата.
+
+```sh
+bash gradlew :app:testDebugUnitTest --tests '*QualificationDiagnosticsTest' :app:testP6a2Qualification :app:testP6aRuntimeResults :app:testP6aRuntimeDiagnostics --console=plain
+bash gradlew :app:testDebugUnitTest --tests '*QualificationDiagnosticsTest' :app:testP4SourceIdentity :app:assembleDebug :app:assembleDebugAndroidTest :app:lintDebug --console=plain
+bash gradlew -Pp6aReleaseRuntime=true :app:verifyP6aIsolation :app:verifyP4BuildIdentity :app:testP6a2Qualification :app:testP6aRuntimeResults :app:testP6aRuntimeDiagnostics :app:testP4SourceIdentity :app:lintRelease :app:lintP1Release --console=plain
+bash gradlew -Pp6aReleaseRuntime=true :app:verifyP6aIsolation :app:verifyP4BuildIdentity :app:lintP1Release --console=plain
+python3 tools/p6a/check-isolation.py
+P1_AUDIT_ARGUMENTS=app/build/reports/p6a-runtime/audit-arguments.txt python3 tools/p1/check-apk-audit.py
+```
+
+Использованы source /workspace/tooling/env.sh и --offline --no-daemon --no-parallel
+--max-workers=2; Gradle9.6.0/Oracle25.0.4.1, остальные версии прежние. Windows ветви и
+Android новых APK **NOT_RUN агента**: свежий adb devices -l завершился134,
+Cannot mkdir /home/agent/.android: Read-only file system; список устройств не получен.
+Сборка/host fixtures не означают Android PASS. Для нового user run обязательны
+2 completed methods на каждом выбранном устройстве,0 failures/skips, итоговый строгий
+gate; при повторном отказе сохранить новый ZIP, не заменять проверки предположением.
+
+Подготовка до commit (не clean build будущего head):
+
+```properties
+sourceRevision=501ed72f4ec6c044101fc748f7a651b0cf30da50
+sourceFingerprint=6699600899d12b0d0ec7f49ff8d00210a681f038e12b19499aa8e986563a3ca4
+sourceDirty=true
+sourceCodeDirty=true
+workingTreeDirty=true
+wrapperModified=false
+artifactBundleId=a4f8a74cf283bcf1d76c2aee406c25d2289174c89c0a370ccaba79e4563f6c7f
+targetSha256=aecc1971c7134551e9aa7fedcbdebd52c4a9b2b94bd545366917238993c64260
+testSha256=26fe30b41bb6fec152afdbff932e9d7dba0984a9f754537114c6277f3a923276
+targetMapId=45e1d0561aa469e0e1be02a8911df6f771dab373b43bbf495ff8061f64f3e605
+testMapId=a54845eb63b734cd118bb8d5fa6e2b7d9464e5604d26f96baf639497b8119a11
+targetMappingSha256=47bb9d3f25f1b437fe9aa1632ab1a91d51d6438199ffe0bc10082760310d9185
+testMappingSha256=f0f6e4f622957b27e4162f7849a9d5ddb607961cf2a6a205ae3c7ccc76764bda
+runtime=NOT_RUN
+```
+
+Оба mappings/configs/rules сохранены в immutable artifacts/<bundle> и
+p1-diagnostics.zip. Логи: ignored work/p6a2-diagnostics-fix; final APK/source
+audit повторён после проверки сохранения исходного helper runId.
+
 ## Исправление проверки владельца фабрики после пользовательского прогона
 
 Исходный head PR14 `01faca8df648fa558c2f1a567e8fb00529234712` проверен fetch/API;

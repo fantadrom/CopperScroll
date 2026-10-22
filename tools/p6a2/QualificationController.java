@@ -41,13 +41,32 @@ public final class QualificationController {
         String actual=adb(adb,serial,"shell","sha256sum",path).trim().split("\\s+")[0];
         QualificationLedger.require(actual.equals(expected),"Installed artifact differs from audited pair");
     }
-    static Properties invoke(String adb,String serial,String method,String id,Path dir) throws Exception {
+    /** Save diagnostic response BEFORE evaluating the strict method/runner gate. */
+    static void capture(String text,String method,String id,Path dir,Properties ledger) throws Exception {
+        Files.writeString(dir.resolve(method+"-instrumentation.txt"),text);
+        Properties response;
+        try { response=QualificationLedger.response(text); }
+        catch(Exception e) {
+            Files.writeString(dir.resolve(method+"-helper-response-unavailable.txt"),e.getClass().getSimpleName()+": "+e.getMessage());
+            return; // No receipt is evidence of nothing; terminal() below still rejects it.
+        }
+        QualificationLedger.write(dir.resolve(method+"-helper-response.properties"),response);
+        QualificationLedger.observeResponse(ledger,response,method,id);
+    }
+    static Properties acceptOutput(String text,String method,String id,Path dir,Properties ledger) throws Exception {
+        capture(text,method,id,dir,ledger);
+        Properties p=QualificationLedger.terminal(text,method,id);
+        QualificationLedger.write(dir.resolve(method+".properties"),p); return p;
+    }
+    static Properties invoke(String adb,String serial,String method,String id,Path dir,Properties ledger) throws Exception {
         String text;
         try { text=command(660,adb,"-s",serial,"shell","am","instrument","-w","-r","-e","class",QualificationLedger.SUITE+"#"+method,
             "-e","qualificationRunId",id,"-e","p1ExpectedVariant","p1Release",TEST+"/androidx.test.runner.AndroidJUnitRunner"); }
-        catch(CommandFailure e) { Files.writeString(dir.resolve(method+"-instrumentation.txt"),e.output); throw e; }
-        Files.writeString(dir.resolve(method+"-instrumentation.txt"),text);
-        Properties p=QualificationLedger.terminal(text,method,id); QualificationLedger.write(dir.resolve(method+".properties"),p); return p;
+        catch(CommandFailure e) {
+            try { capture(e.output,method,id,dir,ledger); } catch(Exception diagnostic) { e.addSuppressed(diagnostic); }
+            throw e;
+        }
+        return acceptOutput(text,method,id,dir,ledger);
     }
     static Properties base(Properties artifacts,Properties source,String id,String device,String mode) throws Exception {
         Properties p=new Properties();
@@ -55,7 +74,7 @@ public final class QualificationController {
         for(String k:RuntimeSourceIdentity.FIELDS) p.setProperty(k,QualificationLedger.value(source,k));
         for(String line:List.of("schemaVersion=1","policyVersion=P6A2-RESEARCH-1","productionAdmission=REFUSED","productionApproved=false",
             "existingWriteDurable=UNKNOWN","durableCreateIdentity=UNKNOWN","durableLocalState=UNKNOWN","volume=UNKNOWN","backend=UNKNOWN",
-            "physicalInterruption=NOT_RUN","controlledStorageInterruption=NOT_RUN","experimentOutcome=NOT_RUN","phase=NOT_STARTED","completedMethods=0")) {
+            "physicalInterruption=NOT_RUN","controlledStorageInterruption=NOT_RUN","experimentOutcome=NOT_RUN","phase=NOT_STARTED","completedMethods=0","checkpointPhase=NOT_OBSERVED","preparationVerified=false","preparationCompleted=false")) {
             int eq=line.indexOf('='); p.setProperty(line.substring(0,eq),line.substring(eq+1));
         }
         p.setProperty("expected","SCRATCH_AND_WHOLE_LOCAL_RECORD_SURVIVE_INTERVENTION");
@@ -74,9 +93,18 @@ public final class QualificationController {
         QualificationLedger.validate(p); QualificationLedger.write(dir.resolve("ledger.properties"),p);
         StringBuilder s=new StringBuilder();
         for(String k:List.of("schemaVersion","runId","intervention","phase","experimentOutcome","completedMethods","productionAdmission",
-            "existingWriteDurable","durableCreateIdentity","durableLocalState","physicalInterruption","controlledStorageInterruption","artifactBundleId","sourceRevision","sourceFingerprint","cleanup","failureType"))
+            "existingWriteDurable","durableCreateIdentity","durableLocalState","physicalInterruption","controlledStorageInterruption","artifactBundleId","sourceRevision","sourceFingerprint","cleanup","failureType",
+            "checkpointPhase","preparationVerified","preparationCompleted","helperMethod","helperStatus","failureCode","failureType0","failureOrigin0",
+            "lastVerifiedCheck","observedWritable","observedGrantCount","observedExistingWriteDurable","expectedSize","observedSize",
+            "contentHashMatches","identityMatches","identityDeviceMatches","identityInodeMatches"))
             if(p.containsKey(k)) s.append(k).append('=').append(p.getProperty(k)).append('\n');
         Files.writeString(dir.resolve("qualification-result.txt"),s);
+    }
+    static void failed(Properties ledger,Exception e) {
+        if("PREPARING".equals(ledger.getProperty("phase"))) ledger.setProperty("phase","PREPARATION_FAILED");
+        else if("RECOVERING".equals(ledger.getProperty("phase"))) ledger.setProperty("phase","RECOVERY_FAILED");
+        ledger.setProperty("observed","FAILED_OR_INCOMPLETE"); ledger.setProperty("experimentOutcome","FAIL");
+        ledger.setProperty("failureType",e.getClass().getSimpleName());
     }
     static void archive(Path output) throws Exception {
         Path zip=output.resolve("qualification-diagnostics.zip"); long total=0;
@@ -121,7 +149,8 @@ public final class QualificationController {
                 try {
                     if(resume) {
                         Properties old=QualificationLedger.read(state); QualificationLedger.validate(old);
-                        QualificationLedger.require("PREPARED".equals(old.getProperty("phase")) && "NOT_RUN".equals(old.getProperty("experimentOutcome")),"Stale/consumed reboot attempt");
+                        QualificationLedger.require("PREPARED".equals(old.getProperty("phase")) && "NOT_RUN".equals(old.getProperty("experimentOutcome")) && "true".equals(old.getProperty("preparationCompleted")),"Stale/consumed reboot attempt");
+                        ledger.putAll(old);
                     } else {
                         summary(dir,ledger);
                         for(String[] apk:new String[][]{{"p1Release/app-p1Release.apk","target"},{"androidTest/p1Release/app-p1Release-androidTest.apk","test"}})
@@ -132,16 +161,22 @@ public final class QualificationController {
                     if(resume) before=QualificationLedger.read(dir.resolve("prepareReboot.properties"));
                     else {
                         System.out.println("P6a.2: unlock selected device and choose a dedicated EMPTY scratch folder; production admission REFUSED.");
-                        before=invoke(adb,serial,reboot?"prepareReboot":"prepareWorker",deviceId,dir); QualificationLedger.observation(before,false);
+                        ledger.setProperty("phase","PREPARING"); summary(dir,ledger);
+                        before=invoke(adb,serial,reboot?"prepareReboot":"prepareWorker",deviceId,dir,ledger);
                     }
-                    for(String k:before.stringPropertyNames()) if(!Set.of("status","method","runId","phase").contains(k)) ledger.setProperty(k,before.getProperty(k));
+                    QualificationLedger.observation(before,false);
+                    QualificationLedger.observeResponse(ledger,before,reboot?"prepareReboot":"prepareWorker",deviceId);
+                    ledger.setProperty("preparationCompleted","true");
                     ledger.setProperty("observed","PREPARED_CHECKPOINT_ONLY"); ledger.setProperty("phase","PREPARED"); ledger.setProperty("completedMethods","1"); summary(dir,ledger);
                     if(!mode.equals("rebootPrepare")) {
-                        Properties after=invoke(adb,serial,reboot?"recoverReboot":"recoverWorker",deviceId,dir);
+                        ledger.setProperty("phase","RECOVERING"); summary(dir,ledger);
+                        Properties after=invoke(adb,serial,reboot?"recoverReboot":"recoverWorker",deviceId,dir,ledger);
                         QualificationLedger.recovered(before,after,reboot);
+                        QualificationLedger.observeResponse(ledger,after,reboot?"recoverReboot":"recoverWorker",deviceId);
                         ledger.setProperty("observed","SCRATCH_AND_WHOLE_LOCAL_RECORD_SURVIVED"); ledger.setProperty("phase","RECOVERED"); ledger.setProperty("completedMethods","2"); ledger.setProperty("restartEvidence","CHECKED"); ledger.setProperty("experimentOutcome","PASS");
                     }
-                } catch(Exception e) { ledger.setProperty("observed","FAILED_OR_INCOMPLETE"); ledger.setProperty("experimentOutcome","FAIL"); ledger.setProperty("failureType",e.getClass().getSimpleName()); failures.add(hash(serial)+": "+e.getMessage());
+                } catch(Exception e) {
+                    failed(ledger,e); failures.add(hash(serial)+": "+e.getMessage());
                     Files.writeString(dir.resolve("first-failure.txt"),e.toString());
                 } finally { summary(dir,ledger); }
             }

@@ -33,15 +33,41 @@ public final class QualificationLedger {
     static void match(Properties a,Properties b,List<String> keys) {
         for(String k:keys) require(value(a,k).equals(value(b,k)),"Evidence mismatch: "+k);
     }
+    /** Diagnostic decoding is independent of acceptance: failed JUnit blocks still carry evidence. */
+    static Properties response(String terminal) throws Exception {
+        require(terminal.length()<=2*1024*1024,"Runner log budget");
+        String receipt=null, prefix="INSTRUMENTATION_STATUS: p6a2ReceiptBase64=";
+        for(String line:terminal.split("\\R")) if(line.startsWith(prefix)) {
+            require(receipt==null,"Duplicate receipt"); receipt=line.substring(prefix.length()).trim();
+        }
+        require(receipt!=null && receipt.length()<24000,"Missing/oversized receipt");
+        return parse(new String(Base64.getDecoder().decode(receipt),StandardCharsets.UTF_8));
+    }
+    static final Set<String> OBSERVATION_FIELDS=Set.of("checkpointPhase","preparationVerified","pid","session","bootCount",
+        "rootHash","environmentHash","authority","providerPackage","providerVersion","providerBuildHash","androidBuildHash","androidApi",
+        "checkpoints","lock","productionCreate","namespacePublication","recovery","grants","identity","cleanup",
+        "lastVerifiedCheck","observedWritable","observedGrantCount","observedExistingWriteDurable","expectedSize","observedSize",
+        "contentHashMatches","identityMatches","identityDeviceMatches","identityInodeMatches","checkpointReadFailureType");
+    static final Set<String> DIAGNOSTIC_FIELDS=Set.of("lastVerifiedCheck","observedWritable","observedGrantCount",
+        "observedExistingWriteDurable","expectedSize","observedSize","contentHashMatches","identityMatches",
+        "identityDeviceMatches","identityInodeMatches","checkpointReadFailureType");
+    static boolean failureField(String key) { return key.matches("failure(Code|Truncated|Type[0-3]|Origin[0-3]|Frames[0-3]|Relation[0-3])"); }
+    static void observeResponse(Properties ledger,Properties p,String method,String id) {
+        require(method.equals(value(p,"method")) && id.equals(value(p,"runId")),"Foreign run/method");
+        String status=value(p,"status");
+        // Diagnostic values describe THIS response, never an earlier successful method.
+        for(String k:new ArrayList<>(ledger.stringPropertyNames())) if(DIAGNOSTIC_FIELDS.contains(k) || failureField(k)) ledger.remove(k);
+        ledger.setProperty("helperStatus",status); ledger.setProperty("helperMethod",method);
+        for(String k:p.stringPropertyNames()) if(OBSERVATION_FIELDS.contains(k) ||
+            failureField(k)) ledger.setProperty(k,p.getProperty(k));
+    }
     static Properties terminal(String terminal,String method,String runId) throws Exception {
         require(terminal.length()<=2*1024*1024,"Runner log budget");
-        String receipt=null; int completed=0,runnerEnds=0; Properties block=new Properties();
+        int completed=0,runnerEnds=0; Properties block=new Properties();
         for(String line:terminal.split("\\R")) {
             if(line.startsWith("INSTRUMENTATION_CODE:")) {
                 require(line.substring(line.indexOf(':')+1).trim().equals("-1"),"Runner exit mismatch"); runnerEnds++;
             }
-            String prefix="INSTRUMENTATION_STATUS: p6a2ReceiptBase64=";
-            if(line.startsWith(prefix)) { require(receipt==null,"Duplicate receipt"); receipt=line.substring(prefix.length()).trim(); }
             for(String k:List.of("class","test","numtests")) {
                 String start="INSTRUMENTATION_STATUS: "+k+"=";
                 if(line.startsWith(start)) block.setProperty(k,line.substring(start.length()).trim());
@@ -56,12 +82,12 @@ public final class QualificationLedger {
         }
         require(completed==1 && runnerEnds==1 && terminal.contains("OK (1 test)") && terminal.contains("INSTRUMENTATION_CODE: -1") &&
             !terminal.contains("INSTRUMENTATION_FAILED") && !terminal.contains("shortMsg=") && !terminal.contains("FAILURES"),"Zero/partial/crashed runner");
-        require(receipt!=null && receipt.length()<24000,"Missing/oversized receipt");
-        Properties p=parse(new String(Base64.getDecoder().decode(receipt),StandardCharsets.UTF_8));
+        Properties p=response(terminal);
         require(method.equals(value(p,"method")) && runId.equals(value(p,"runId")),"Foreign run/method");
         return p;
     }
     static void observation(Properties p,boolean recovered) {
+        require(value(p,"preparationVerified").equals("true"),"Preparation verification incomplete");
         require((recovered?"RECOVERED":"PREPARED").equals(value(p,"status")),"Incomplete experiment");
         require(value(p,"checkpointPhase").equals(recovered?"RECOVERED":"PREPARED"),"Incomplete checkpoint");
         require(value(p,"checkpoints").equals(PHASES+(recovered?",RECOVERED":"")),"Incomplete phase sequence");
@@ -101,6 +127,7 @@ public final class QualificationLedger {
         require(value(p,"sourceRevision").matches("[0-9a-f]{40}"),"Missing revision");
         for(String k:List.of("sourceDirty","sourceCodeDirty","workingTreeDirty","wrapperModified")) require(Set.of("true","false").contains(value(p,k)),"Missing source state");
         if(value(p,"experimentOutcome").equals("PASS")) {
+            require(value(p,"preparationCompleted").equals("true") && value(p,"preparationVerified").equals("true") && value(p,"checkpointPhase").equals("RECOVERED"),"Checkpoint alone cannot PASS");
             require(value(p,"phase").equals("RECOVERED") && value(p,"completedMethods").equals("2"),"Partial experiment cannot PASS");
             require(Set.of("WORKER_PROCESS","ORDERLY_REBOOT").contains(value(p,"intervention")),"Wrong intervention");
             require(value(p,"restartEvidence").equals("CHECKED"),"No restart proof");

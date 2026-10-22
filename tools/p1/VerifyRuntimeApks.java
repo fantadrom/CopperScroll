@@ -56,7 +56,7 @@ public final class VerifyRuntimeApks {
                 require(real.keySet().stream().noneMatch(n->n.startsWith("Lcom/fantadrom/copperscroll/storage/runtime/ExternalGrantOwnerService")),"Grant owner service leaked into ordinary release");
                 byte[] manifest=release.getInputStream(release.getEntry("AndroidManifest.xml")).readAllBytes();
                 require(!new String(manifest,StandardCharsets.UTF_8).contains("p6aharness") && !new String(manifest,StandardCharsets.UTF_16LE).contains("p6aharness"),"Harness manifest leaked into ordinary release");
-                for(String type:List.of("ControlledDocumentsProvider","P6aHelperService","P6aProviderProbeActivity","HarnessFaults","ProviderRestartFaults","QualificationSession"))
+                for(String type:List.of("ControlledDocumentsProvider","P6aHelperService","P6aProviderProbeActivity","HarnessFaults","ProviderRestartFaults","QualificationSession","QualificationDiagnostics"))
                     require(test.containsKey("Lcom/fantadrom/copperscroll/p6aharness/"+type+";"),"P6a test component missing: "+type);
             }
             System.out.println("P6a ordinary release isolation PASS; runtime=NOT_RUN"); return;
@@ -135,7 +135,7 @@ public final class VerifyRuntimeApks {
                 require(testClasses.contains(qualificationSuite) && !appClasses.contains(qualificationSuite),"Qualification controller must live only in test APK");
                 for(String method:List.of("prepareWorker","recoverWorker","prepareReboot","recoverReboot"))
                     require((testIndex.classes.get(qualificationSuite).methods.getOrDefault(method+"()V",0)&1)!=0,"Qualification method missing: "+method);
-                for(String type:List.of("ControlledDocumentsProvider","P6aHelperService","P6aProviderProbeActivity","HarnessFaults","ProviderRestartFaults","QualificationSession"))
+                for(String type:List.of("ControlledDocumentsProvider","P6aHelperService","P6aProviderProbeActivity","HarnessFaults","ProviderRestartFaults","QualificationSession","QualificationDiagnostics"))
                     require(appClasses.contains("Lcom/fantadrom/copperscroll/p6aharness/"+type+";"),"P6a target harness missing: "+type);
             } else require(appClasses.stream().noneMatch(n->n.startsWith("Lcom/fantadrom/copperscroll/p6aharness/")),"P6a harness present without opt-in");
             String p5bSuite="Lcom/fantadrom/copperscroll/storage/runtime/P5bChangeSecretRuntimeTest;";

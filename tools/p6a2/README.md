@@ -82,7 +82,10 @@ P6a/P3/P5 fault suites cover full transactions/copy/compact/rekey/recovery. They
 separate from real-root observations, which cannot execute those forbidden workflows.
 
 Private checkpoints are forced before/after meaningful create/write/force phases,
-then PREPARED before worker termination/reboot. Raw URI/fstat/local-state identity
+then PREPARED before the final read-back checks. A separate forced
+preparationVerified=true marker is written only after every read-back/close succeeds;
+recovery requires that marker. PREPARED alone cannot authorize worker termination,
+recovery or a completed method. Raw URI/fstat/local-state identity
 stay under app-private noBackup. The service is the existing nonexported helper,
 with sequential IO and production publisher locks. No new production exports/UI.
 All opened stores/FDs/local state are closed via use; timeout is failure and does
@@ -104,7 +107,33 @@ ONLY their chosen dedicated scratch folder. Never select a personal container.
 
 `app/build/reports/p6a2-qualification/<hostRunId>/<deviceHash>/` contains compact
 qualification-result.txt, ledger.properties, separate method receipts/logs and first
-failure type. The host directory preserves one source/artifact pair and its immutable
+failure type. Every invocation saves `<method>-helper-response.properties` BEFORE
+checking the strict terminal gate, including a status=error receipt. Missing/malformed
+receipts get `<method>-helper-response-unavailable.txt`; command failures preserve any
+partial response too. Only method/runId-bound fields can update the ledger; accepted
+`<method>.properties` still requires the strict method/runner gate.
+
+checkpointPhase is the latest observed private checkpoint, not completion. phase is
+host progress (PREPARING/PREPARATION_FAILED/PREPARED/RECOVERING/RECOVERY_FAILED/RECOVERED);
+preparationVerified records the helper's forced post-verification marker, while
+preparationCompleted means the prepare method actually passed the strict gate.
+completedMethods remains0 on prepare failure even if checkpointPhase=PREPARED.
+A lost acknowledgement or failed runner cannot promote either marker to method PASS.
+Recovery receipts refresh checkpoint/PID/session in the ledger instead of leaving
+preparation's values behind. helperMethod identifies the response; transient diagnostic
+values are replaced per response, so a previous method's checks cannot look current.
+
+Failure codes VERIFY_MODE, VERIFY_SIZE, VERIFY_HASH and VERIFY_IDENTITY distinguish
+the unchanged invariants. Safe observations include writable/grant-count/durability,
+expected/observed size, contentHashMatches and identity device/inode comparisons.
+Operation stages also distinguish open/read/close/checkpoint/local-state failures.
+Bounded failureTypeN/failureOriginN/failureFramesN/failureRelationN preserve the
+primary, cause and suppressed exception frames (up to4 nodes/6 frames each, with
+explicit truncation). Messages, raw URI/path/fstat identity, content digests and data
+are never serialized. Consult the exact target mapping from the same artifact pair
+if helper frames need retrace; test mapping is for the instrumentation stack.
+
+The host directory preserves one source/artifact pair and its immutable
 mapping/configuration ZIP, plus qualification-diagnostics.zip. Reboot resume uses
 the existing host directory; no stale output is accepted for a new method execution.
 The public ledger exposes no user URI/path/binding/credentials/plaintext. Error logs

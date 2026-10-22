@@ -71,6 +71,20 @@ productionAdmission=REFUSED и BUILD SUCCESSFUL. Три guarantee-поля UNKNO
 Результаты: `app\build\reports\p6a2-qualification\<hostRunId>\<deviceHash>\`
 `qualification-result.txt`, `ledger.properties`, отдельные method receipts/logs;
 общий `qualification-diagnostics.zip` в `<hostRunId>`. Пути печатаются в Terminal.
+Даже при FAIL сохраняется `prepareWorker-helper-response.properties` (либо
+`recoverWorker-helper-response.properties`) с failureCode, failureOrigin0 и
+failureFrames0. Для четырёх финальных проверок коды: VERIFY_MODE, VERIFY_SIZE,
+VERIFY_HASH, VERIFY_IDENTITY. Здесь же безопасные значения размера/режима и результаты
+сравнений; URI, содержимое и тексты исключений не выводятся. Если helper не вернул
+читаемый ответ, отдельный `*-helper-response-unavailable.txt` объясняет отсутствие.
+
+checkpointPhase=PREPARED означает достигнутый checkpoint. Успешная подготовка требует
+также preparationVerified=true, preparationCompleted=true и completedMethods=1.
+При отказе после checkpoint ожидаются phase=PREPARATION_FAILED, completedMethods=0,
+experimentOutcome=FAIL; это не выполненный prepare и helper ещё не убивается.
+При успешном recover ledger содержит свежие checkpointPhase=RECOVERED, PID/session.
+Старый reboot checkpoint без нового verified-маркера не возобновляется: сохранить
+его диагностику и выполнить новую подготовку на текущей APK-паре.
 
 ## 3. Возобновляемый штатный reboot
 

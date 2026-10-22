@@ -67,9 +67,40 @@ internal object QualificationSession {
     }
     fun phase(c: Context,id: String): Bundle = Bundle().apply {
         val f=File(dir(c,id),"checkpoint.properties")
-        putString("checkpointPhase",if(f.isFile) read(f).getProperty("phase") else "MISSING")
+        val p=if(f.isFile) read(f) else Properties()
+        putString("checkpointPhase",p.getProperty("phase","MISSING"))
+        putBoolean("preparationVerified",p.getProperty("preparationVerified")=="true")
     }
-    fun prepare(c: Context,id: String): Bundle {
+    /** Preserve helper-side failure frames before crossing Binder; no exception messages escape. */
+    fun execute(c: Context,id: String,action: String): Bundle {
+        val diagnostic=QualificationDiagnostics()
+        diagnostic.stage=if(action=="qualificationPrepare") QualificationDiagnostics.Stage.PREPARE else QualificationDiagnostics.Stage.RECOVER
+        val result=try {
+            when(action) {
+                "qualificationPrepare" -> prepare(c,id,diagnostic)
+                "qualificationProcess" -> recover(c,id,false,diagnostic)
+                "qualificationReboot" -> recover(c,id,true,diagnostic)
+                else -> error("UNKNOWN_ACTION")
+            }.apply { diagnostic.snapshot().forEach { (k,v) -> putString(k,v) } }
+        } catch(e: Exception) {
+            Bundle().apply {
+                putString("status","error")
+                diagnostic.failure(e).forEach { (k,v) -> putString(k,v) }
+            }
+        }
+        result.putString("runId",id); result.putInt("pid",Process.myPid()); result.putString("session",session)
+        // A secondary checkpoint-read failure must never replace the original helper failure.
+        try { result.putAll(phase(c,id)) } catch(e: Exception) {
+            result.putString("checkpointPhase","UNAVAILABLE")
+            result.putString("checkpointReadFailureType",e.javaClass.simpleName)
+            if(result.getString("status")!="error") {
+                result.putString("status","error")
+                diagnostic.failure(e).forEach { (k,v) -> result.putString(k,v) }
+            }
+        }
+        return result
+    }
+    private fun prepare(c: Context,id: String,d: QualificationDiagnostics): Bundle {
         val directory=dir(c,id); val checkpoint=File(directory,"checkpoint.properties")
         check(!checkpoint.exists()) // No replay or implicit reset.
         val rootFile=File(c.noBackupFilesDir,"p6a-probe-$id-root.txt")
@@ -81,7 +112,7 @@ internal object QualificationSession {
         // Explicit probe exception: a NEW synthetic scratch only. This does not bypass the
         // production factory's create gate for any real container or workflow.
         val p=Properties().apply {
-            setProperty("runId",id); setProperty("phase","BEFORE_CREATE"); setProperty("root",root.toString())
+            setProperty("runId",id); setProperty("preparationVerified","false"); setProperty("phase","BEFORE_CREATE"); setProperty("root",root.toString())
             setProperty("environment",environment(c,root)); setProperty("pid",Process.myPid().toString())
             setProperty("session",session); setProperty("bootCount",boot(c).toString())
         }
@@ -110,37 +141,53 @@ internal object QualificationSession {
                 p.setProperty("localHash",hex(hash(LocalStateCodec.encode(local.read()))))
             }
             p.setProperty("sha256",hex(hash(bytes))); p.setProperty("phase","PREPARED"); save(checkpoint,p)
-            verifyBytes(c,uri,p)
+            verifyBytes(c,uri,p,d)
+            d.stage=QualificationDiagnostics.Stage.SAVE_VERIFIED
+            p.setProperty("preparationVerified","true"); save(checkpoint,p)
+            d.stage=QualificationDiagnostics.Stage.RECEIPT
             return receipt(c,root,p,"PREPARED")
         } finally { bytes.fill(0) }
     }
-    private fun verifyBytes(c: Context,uri: Uri,p: Properties) {
+    private fun verifyBytes(c: Context,uri: Uri,p: Properties,d: QualificationDiagnostics) {
+        d.stage=QualificationDiagnostics.Stage.OPEN_ADAPTER
         val opened=SafStoreFactory(c).openOriginal(uri,true)
         opened.store.use { store ->
-            check(!opened.writable && opened.decision.granted.isEmpty() && !store.guarantees.existingWriteDurable)
-            check(store.size==262144L)
+            d.stage=QualificationDiagnostics.Stage.VERIFY_MODE
+            d.mode(opened.writable,opened.decision.granted.size,store.guarantees.existingWriteDurable)
+            d.stage=QualificationDiagnostics.Stage.VERIFY_SIZE
+            d.size(store.size)
+            d.stage=QualificationDiagnostics.Stage.READ_BYTES
             val bytes=store.readFullyAt(0,262144)
-            try { check(hex(hash(bytes))==p.getProperty("sha256")) } finally { bytes.fill(0) }
+            d.stage=QualificationDiagnostics.Stage.VERIFY_HASH
+            try { d.hash(hex(hash(bytes))==p.getProperty("sha256")) } finally { bytes.fill(0) }
+            d.stage=QualificationDiagnostics.Stage.CLOSE_ADAPTER
         }
         // Observed fstat only, after closing the adapter: no duplicate close under its lease.
+        d.stage=QualificationDiagnostics.Stage.OPEN_IDENTITY
         c.contentResolver.openFileDescriptor(uri,"r")!!.use { fd ->
-            val stat=Os.fstat(fd.fileDescriptor); check("${stat.st_dev}:${stat.st_ino}"==p.getProperty("identity"))
+            d.stage=QualificationDiagnostics.Stage.VERIFY_IDENTITY
+            val stat=Os.fstat(fd.fileDescriptor)
+            d.identity(p.getProperty("identity"),"${stat.st_dev}:${stat.st_ino}")
+            d.stage=QualificationDiagnostics.Stage.CLOSE_IDENTITY
         }
     }
-    fun recover(c: Context,id: String,reboot: Boolean): Bundle {
+    private fun recover(c: Context,id: String,reboot: Boolean,d: QualificationDiagnostics): Bundle {
         val checkpoint=File(dir(c,id),"checkpoint.properties"); val p=read(checkpoint)
-        check(p.getProperty("runId")==id && p.getProperty("phase")=="PREPARED")
+        check(p.getProperty("runId")==id && p.getProperty("phase")=="PREPARED" && p.getProperty("preparationVerified")=="true")
         if(reboot) check(boot(c)>p.getProperty("bootCount").toInt()) { "REBOOT_NOT_OBSERVED" }
         else check(boot(c)==p.getProperty("bootCount").toInt() && Process.myPid()!=p.getProperty("pid").toInt())
         check(session!=p.getProperty("session")) { "FRESH_WORKER_NOT_OBSERVED" }
         val root=Uri.parse(p.getProperty("root")); check(environment(c,root)==p.getProperty("environment")) { "ENVIRONMENT_CHANGED" }; grant(c,root)
-        verifyBytes(c,Uri.parse(p.getProperty("uri")),p)
+        verifyBytes(c,Uri.parse(p.getProperty("uri")),p,d)
+        d.stage=QualificationDiagnostics.Stage.VERIFY_LOCAL_STATE
         AppPrivateLocalState.open(c,"p6a2-local-$id").use { local ->
             check(local.presence==LocalPresence.Ready)
             check(hex(hash(LocalStateCodec.encode(local.read())))==p.getProperty("localHash"))
             check(local.read().journal!!.stage==JournalStage.Prepared)
         }
+        d.stage=QualificationDiagnostics.Stage.SAVE_VERIFIED
         p.setProperty("phase","RECOVERED"); save(checkpoint,p)
+        d.stage=QualificationDiagnostics.Stage.RECEIPT
         return receipt(c,root,p,"RECOVERED")
     }
     private fun receipt(c: Context,root: Uri,p: Properties,phase: String)=Bundle().apply {

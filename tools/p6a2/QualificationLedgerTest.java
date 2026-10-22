@@ -12,6 +12,7 @@ public final class QualificationLedgerTest {
         Properties p=new Properties();
         for(String k:List.of("rootHash","environmentHash","providerBuildHash","androidBuildHash")) p.setProperty(k,HASH);
         p.setProperty("runId",ID); p.setProperty("status",after?"RECOVERED":"PREPARED");
+        p.setProperty("preparationVerified","true");
         p.setProperty("checkpointPhase",after?"RECOVERED":"PREPARED");
         p.setProperty("checkpoints",QualificationLedger.PHASES+(after?",RECOVERED":""));
         p.setProperty("authority","com.android.externalstorage.documents"); p.setProperty("providerPackage","com.android.externalstorage");
@@ -31,7 +32,7 @@ public final class QualificationLedgerTest {
         Properties before=observed(false),after=observed(true);
         QualificationLedger.recovered(before,after,false); checks++;
         after.setProperty("bootCount","11"); QualificationLedger.recovered(before,after,true); checks++;
-        for(String key:List.of("runId","rootHash","environmentHash","authority","providerPackage","providerVersion","providerBuildHash","androidBuildHash","androidApi","status","checkpointPhase","checkpoints","grants","identity","cleanup","lock","recovery")) {
+        for(String key:List.of("runId","rootHash","environmentHash","authority","providerPackage","providerVersion","providerBuildHash","androidBuildHash","androidApi","status","preparationVerified","checkpointPhase","checkpoints","grants","identity","cleanup","lock","recovery")) {
             Properties wrong=observed(true); wrong.setProperty(key,"wrong"); reject(()->QualificationLedger.recovered(before,wrong,false));
         }
         Properties sameSession=observed(true); sameSession.setProperty("session",ID); reject(()->QualificationLedger.recovered(before,sameSession,false));
@@ -61,11 +62,54 @@ public final class QualificationLedgerTest {
         QualificationLedger.validate(ledger); checks++;
         ledger.setProperty("experimentOutcome","PASS"); reject(()->QualificationLedger.validate(ledger));
         ledger.setProperty("phase","RECOVERED"); ledger.setProperty("completedMethods","2"); ledger.setProperty("restartEvidence","CHECKED");
+        reject(()->QualificationLedger.validate(ledger));
+        ledger.setProperty("preparationCompleted","true"); ledger.setProperty("preparationVerified","true"); ledger.setProperty("checkpointPhase","RECOVERED");
         QualificationLedger.validate(ledger); checks++;
         for(String k:List.of("productionApproved","productionAdmission","existingWriteDurable","durableCreateIdentity","durableLocalState","backend","volume","physicalInterruption","controlledStorageInterruption","policyVersion","schemaVersion")) {
             Properties wrong=(Properties)ledger.clone(); wrong.setProperty(k,"qualified"); reject(()->QualificationLedger.validate(wrong));
         }
         Properties privateData=(Properties)ledger.clone(); privateData.setProperty("selectedUri","content://synthetic"); reject(()->QualificationLedger.validate(privateData));
+        // Failed helper response survives a negative terminal gate. Checkpoint != completion.
+        Path temp=Files.createTempDirectory("p6a2-helper-diagnostics-");
+        try {
+            Properties failed=observed(false); failed.setProperty("status","error"); failed.setProperty("preparationVerified","false");
+            failed.setProperty("failureCode","VERIFY_IDENTITY"); failed.setProperty("failureOrigin0","safe.Helper.verifyBytes(QualificationSession.kt:123)");
+            String failure=terminal(failed).replace("_CODE: 0","_CODE: -2").replace("OK (1 test)","FAILURES!!!");
+            Properties progress=QualificationController.base(artifacts,source,ID,"synthetic-device","WORKER_PROCESS");
+            reject(()->QualificationController.acceptOutput(failure,"prepareWorker",ID,temp,progress));
+            Properties saved=QualificationLedger.read(temp.resolve("prepareWorker-helper-response.properties"));
+            check(saved.getProperty("failureCode").equals("VERIFY_IDENTITY"));
+            check(saved.getProperty("failureOrigin0").contains("QualificationSession.kt:123"));
+            check(progress.getProperty("checkpointPhase").equals("PREPARED"));
+            check(progress.getProperty("completedMethods").equals("0") && progress.getProperty("preparationCompleted").equals("false"));
+            check(progress.getProperty("preparationVerified").equals("false") && !Files.exists(temp.resolve("prepareWorker.properties")));
+            progress.setProperty("phase","PREPARING"); QualificationController.failed(progress,new IllegalStateException("runner rejected"));
+            QualificationController.summary(temp,progress);
+            check(progress.getProperty("phase").equals("PREPARATION_FAILED") && progress.getProperty("experimentOutcome").equals("FAIL"));
+            check(Files.readString(temp.resolve("qualification-result.txt")).contains("checkpointPhase=PREPARED"));
+            QualificationLedger.validate(progress); checks++;
+            // Lost acknowledgement and valid checkpoint alone never imply a completed method.
+            failed.setProperty("preparationVerified","true");
+            reject(()->QualificationController.acceptOutput(terminal(failed).replace("_CODE: 0","_CODE: -2"),"prepareWorker",ID,temp,progress));
+            check(progress.getProperty("preparationCompleted").equals("false"));
+            Properties foreign=(Properties)failed.clone(); foreign.setProperty("runId",UUID.randomUUID().toString());
+            String oldCheckpoint=progress.getProperty("checkpointPhase"); foreign.setProperty("checkpointPhase","RECOVERED");
+            reject(()->QualificationController.acceptOutput(terminal(foreign),"prepareWorker",ID,temp,progress));
+            check(progress.getProperty("checkpointPhase").equals(oldCheckpoint));
+            // Whitelist cannot modify source/policy/completion even in a bound response.
+            failed.setProperty("productionAdmission","ALLOW"); failed.setProperty("sourceRevision","foreign"); failed.setProperty("completedMethods","2");
+            QualificationLedger.observeResponse(progress,failed,"prepareWorker",ID);
+            check(progress.getProperty("productionAdmission").equals("REFUSED") && progress.getProperty("sourceRevision").equals(source.getProperty("sourceRevision")) && progress.getProperty("completedMethods").equals("0"));
+            QualificationLedger.observeResponse(progress,observed(true),"recoverWorker",ID);
+            check(progress.getProperty("checkpointPhase").equals("RECOVERED") && progress.getProperty("pid").equals("202"));
+            check(!progress.containsKey("failureCode") && progress.getProperty("helperMethod").equals("recoverWorker"));
+            progress.setProperty("phase","RECOVERING"); progress.setProperty("completedMethods","1"); progress.setProperty("preparationCompleted","true");
+            QualificationController.failed(progress,new IllegalStateException("lost acknowledgement"));
+            check(progress.getProperty("phase").equals("RECOVERY_FAILED") && progress.getProperty("completedMethods").equals("1") && progress.getProperty("experimentOutcome").equals("FAIL"));
+            reject(()->QualificationLedger.response(failure+failure));
+            reject(()->QualificationController.acceptOutput("","prepareReboot",ID,temp,progress));
+            check(Files.isRegularFile(temp.resolve("prepareReboot-helper-response-unavailable.txt")) && !Files.exists(temp.resolve("prepareReboot.properties")));
+        } finally { try(var paths=Files.walk(temp)) { for(Path p:paths.sorted(Comparator.reverseOrder()).collect(java.util.stream.Collectors.toList())) Files.delete(p); } }
         Properties research=QualificationLedger.read(Path.of(args[0],"tools/p6a2/evidence-ledger.properties"));
         check(research.getProperty("reviewedProductionPolicy").equals("EMPTY") && research.getProperty("scopeCount").equals("4"));
         for(int n=0;n<4;n++) {

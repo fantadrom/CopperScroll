@@ -33,6 +33,7 @@ class P6aQualificationController {
     private fun send(b: Bundle,method: String) {
         val p=Properties(); p.setProperty("method",method)
         for(k in b.keySet()) p.setProperty(k,b.get(k).toString())
+        if(!p.containsKey("runId")) p.setProperty("runId",id) // Never overwrite a foreign helper run identity.
         val bytes=java.io.ByteArrayOutputStream().also { p.store(it,null) }.toByteArray(); check(bytes.size<16384)
         i.sendStatus(2,Bundle().apply { putString("p6a2ReceiptBase64",Base64.encodeToString(bytes,Base64.NO_WRAP)) })
     }
@@ -40,15 +41,13 @@ class P6aQualificationController {
         pick()
         RemoteHarness(i.targetContext).use { worker ->
             val result=worker.request("qualificationPrepare",name=id)
-            result.putAll(worker.request("qualificationStatus",name=id))
-            send(result,method); check(result.getString("status")=="PREPARED")
+            send(result,method); check(result.getString("status")=="PREPARED" && result.getBoolean("preparationVerified"))
             if(die) worker.die() // Binder death observed; next method must also prove a fresh PID/session.
         }
     }
     private fun recover(method: String,reboot: Boolean) {
         RemoteHarness(i.targetContext).use { worker ->
             val result=worker.request(if(reboot) "qualificationReboot" else "qualificationProcess",name=id)
-            result.putAll(worker.request("qualificationStatus",name=id))
             send(result,method); check(result.getString("status")=="RECOVERED")
         }
     }

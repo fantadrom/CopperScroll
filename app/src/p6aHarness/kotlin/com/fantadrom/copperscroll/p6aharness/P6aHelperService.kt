@@ -27,9 +27,8 @@ class P6aHelperService : Service() {
             try {
                 when(message.data.getString("action")) {
                     "qualificationStatus" -> out.putAll(QualificationSession.phase(this@P6aHelperService,message.data.getString("name")!!))
-                    "qualificationPrepare" -> out.putAll(QualificationSession.prepare(this@P6aHelperService,message.data.getString("name")!!))
-                    "qualificationProcess" -> out.putAll(QualificationSession.recover(this@P6aHelperService,message.data.getString("name")!!,false))
-                    "qualificationReboot" -> out.putAll(QualificationSession.recover(this@P6aHelperService,message.data.getString("name")!!,true))
+                    "qualificationPrepare", "qualificationProcess", "qualificationReboot" -> out.putAll(
+                        QualificationSession.execute(this@P6aHelperService,message.data.getString("name")!!,message.data.getString("action")!!))
                     "tryOpen","hold" -> {
                         val store=SafStoreFactory(this@P6aHelperService).openRequired(Uri.parse(message.data.getString("uri")!!))
                         try {
