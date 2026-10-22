@@ -106,7 +106,8 @@ def main():
         tmp = Path(tmp)
         def rejected(label, target, test, expected, wrong_mapping=False):
             rest = arguments[4:]
-            rest[2] = str(tmp/'diagnostics')
+            # Keep the selected audit profile while isolating generated diagnostics.
+            rest[2] = str(tmp/Path(arguments[6]).name)
             if wrong_mapping: rest[1] = rest[0]
             result = subprocess.run([JAVA, '-cp', str(CLASSES), 'VerifyRuntimeApks',
                 str(target), str(test), str(GOLDEN), str(tmp/'audit.txt'), *rest],

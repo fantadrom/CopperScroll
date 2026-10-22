@@ -122,11 +122,14 @@ class ResourceOwner(store: RandomAccessStore) : AutoCloseable {
      * Only an active operation can do this; a failed reopen must not turn into a verified result. */
     internal fun reopen(permit: WritePermit, factory: () -> RandomAccessStore) {
         check(permit)
-        closeLock(); closeStore()
+        val continuous = lock as? ReopenLease
+        if(continuous != null) continuous.beforeReopen() else closeLock()
+        closeStore()
         val next = factory()
         try {
             requireIo(next.identity == identity,IoCode.AccessLost)
-            lock = next.acquireExclusive(); store = next; storeCloseAttempted = false
+            if(continuous != null) continuous.afterReopen(next) else lock = next.acquireExclusive()
+            store = next; storeCloseAttempted = false
         } catch(e: Throwable) { try { next.close() } catch(clean: Throwable) { e.addSuppressed(clean) }; throw e }
         check(permit)
     }

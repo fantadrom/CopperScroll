@@ -1,6 +1,6 @@
 # P5b Release Runtime — Windows / Android Studio
 
-Ветка `codex/copper-scroll-p5b-copy-compaction`, отдельный Draft PR. Fetch/Pull,
+Ветка `codex/copper-scroll-p5b-change-secret`, отдельный Draft PR. Fetch/Pull,
 Gradle Sync. Wrapper репозитория — Gradle9.6.0 с checksum; AGP9.4.1, Kotlin2.2.10,
 SDK37/min31/Java target11 прежние. Не редактировать wrapper/Gradle/исходники ради запуска.
 При локальных изменениях receipt честно записывает фактические bytes/dirty/wrapper,

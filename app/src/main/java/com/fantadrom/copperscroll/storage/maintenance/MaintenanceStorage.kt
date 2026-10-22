@@ -9,8 +9,8 @@ import java.time.format.DateTimeFormatter
 import java.util.UUID
 import com.fantadrom.copperscroll.storage.crypto.bytes
 
-/** No production/provider profile is approved in P5a. These are explicitly bounded test models. */
-enum class MaintenanceProfile { Synthetic, JvmSynthetic }
+/** Synthetic models remain explicit. AndroidGated requires per-endpoint evidence; it is not approval. */
+enum class MaintenanceProfile { Synthetic, JvmSynthetic, AndroidGated }
 class Artifact(val uri: String, val identity: StoreIdentity) {
     override fun toString() = "Artifact(redacted)"
 }

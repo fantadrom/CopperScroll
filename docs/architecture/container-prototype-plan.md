@@ -155,7 +155,21 @@ Migration в P5 только safe dispatcher и synthetic test-only извест
 
 ## 8. P6 — Android, lifecycle, затем UI (отдельные задания)
 
-**P6a, вход P3/P5:** SAF FD owner/grants/gate для source/backup/candidate roots,
+**P6a.1, вход P3/P5b:** Android SAF/positional IO adapters, один FD owner и
+continuous interprocess lease, noBackup binding+journal publisher, раздельные
+ExistingWriteDurable/DurableCreateIdentity/DurableLocalState gate decisions.
+Управляемый test provider/IPC/restart/fault suite и отдельный явный real-root
+probe/controller. Отрицательный production admission обязателен; compiled test
+contract отсутствует в ordinary release. Отдельный Draft PR, Android подтверждение
+на Honor15 и emulator17; build/host PASS не runtime PASS.
+
+**P6a.2, qualification:** provider/AOSP contracts и controlled interruption,
+namespace/local-state/power-loss evidence конкретных roots/backend/device builds.
+Probe, process death и обычный reboot не заменяют power-loss доказательство.
+До достаточного evidence production allowlist пуста. P6a.1 можно принять отдельно
+от qualification; это не завершённый P6a и не разрешение настоящих секретов.
+
+**Общий нормативный P6a, вход P3/P5:** SAF FD owner/grants/gate для source/backup/candidate roots,
 device faults/namespace/local metadata. Доказать ExistingWriteDurable,
 DurableCreateIdentity, DurableLocalState на конкретных authority/build/root/volume/
 backend/API. **Выход:** SAF/DUR P0 и измеренные профили; до этого production

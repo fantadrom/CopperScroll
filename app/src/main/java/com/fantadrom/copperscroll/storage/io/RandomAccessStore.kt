@@ -42,3 +42,9 @@ interface RandomAccessStore : ReadOnlySource, AutoCloseable {
     fun truncate(length: Long): Boolean = false
     fun acquireExclusive(): AutoCloseable
 }
+
+/** A stable cooperative interprocess guard survives closing/reopening the document FD. */
+interface ReopenLease : AutoCloseable {
+    fun beforeReopen()
+    fun afterReopen(store: RandomAccessStore)
+}

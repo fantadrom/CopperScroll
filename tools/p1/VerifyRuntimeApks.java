@@ -20,6 +20,10 @@ public final class VerifyRuntimeApks {
     private static final String ICU = "com/ibm/icu/impl/data/";
     private static final String TEST = "Lcom/fantadrom/copperscroll/storage/runtime/P1BackendRuntimeTest;";
     private static final List<String> BACKEND = List.of(
+        "Lcom/fantadrom/copperscroll/storage/android/SafUriAccess;",
+        "Lcom/fantadrom/copperscroll/storage/android/AndroidSafStore;",
+        "Lcom/fantadrom/copperscroll/storage/android/SafStoreFactory;",
+        "Lcom/fantadrom/copperscroll/storage/android/AppPrivateLocalState;",
         "Lcom/fantadrom/copperscroll/storage/access/SecretEncoding;",
         "Lcom/fantadrom/copperscroll/storage/access/CanonicalSecret;",
         "Lcom/fantadrom/copperscroll/storage/access/CredentialManager;",
@@ -42,6 +46,21 @@ public final class VerifyRuntimeApks {
         "Lco/nstant/in/cbor/CborDecoder;", "Lco/nstant/in/cbor/CborEncoder;");
 
     public static void main(String[] args) throws Exception {
+        if(args.length == 3 && args[0].equals("--p6a-isolation")) {
+            try(ZipFile release=new ZipFile(args[1]); ZipFile harness=new ZipFile(args[2])) {
+                var real=definitions(release); var test=definitions(harness);
+                for(String type:List.of("AndroidSafStore","SafStoreFactory","AppPrivateLocalState"))
+                    require(real.containsKey("Lcom/fantadrom/copperscroll/storage/android/"+type+";"),"Android adapter missing from ordinary release: "+type);
+                require(real.keySet().stream().noneMatch(n->n.startsWith("Lcom/fantadrom/copperscroll/p6aharness/")),"Test controls/provider/helper leaked into ordinary release");
+                require(!real.containsKey("Lcom/fantadrom/copperscroll/storage/runtime/ExternalGrantDocumentsProvider;"),"External test provider leaked into ordinary release");
+                require(real.keySet().stream().noneMatch(n->n.startsWith("Lcom/fantadrom/copperscroll/storage/runtime/ExternalGrantOwnerService")),"Grant owner service leaked into ordinary release");
+                byte[] manifest=release.getInputStream(release.getEntry("AndroidManifest.xml")).readAllBytes();
+                require(!new String(manifest,StandardCharsets.UTF_8).contains("p6aharness") && !new String(manifest,StandardCharsets.UTF_16LE).contains("p6aharness"),"Harness manifest leaked into ordinary release");
+                for(String type:List.of("ControlledDocumentsProvider","P6aHelperService","P6aProviderProbeActivity","HarnessFaults","ProviderRestartFaults"))
+                    require(test.containsKey("Lcom/fantadrom/copperscroll/p6aharness/"+type+";"),"P6a test component missing: "+type);
+            }
+            System.out.println("P6a ordinary release isolation PASS; runtime=NOT_RUN"); return;
+        }
         if (args.length >= 4 && args[0].equals("--linkage")) {
             System.out.print(DexRuntimeLinkage.check(DexRuntimeLinkage.apk(Path.of(args[1]), false),
                 DexRuntimeLinkage.apk(Path.of(args[2])), java.util.Arrays.stream(args).skip(3).map(Path::of).collect(java.util.stream.Collectors.toList())));
@@ -85,6 +104,36 @@ public final class VerifyRuntimeApks {
                     "namespaceAndLocalStateDurability", "catalogueSplitsAndLimits", "boundedStoreAndConflict"))
                 require((testIndex.classes.get(p3Suite).methods.getOrDefault(method+"()V",0) & 1) != 0,
                     "P3 expected runtime method missing: " + method);
+            boolean p6a=Path.of(args[6]).getFileName().toString().equals("p6a-runtime");
+            String p6aSuite="Lcom/fantadrom/copperscroll/storage/runtime/P6aSafRuntimeTest;";
+            require(!appClasses.contains(p6aSuite),"P6a suite duplicated in target");
+            if(p6a) {
+                require(testClasses.contains(p6aSuite),"P6a suite missing from test APK");
+                String external="Lcom/fantadrom/copperscroll/storage/runtime/ExternalGrantDocumentsProvider;";
+                require(testClasses.contains(external) && !appClasses.contains(external),"External grant provider must belong to the distinct test APK only");
+                String owner="Lcom/fantadrom/copperscroll/storage/runtime/ExternalGrantOwnerService;";
+                require(testClasses.contains(owner) && appClasses.stream().noneMatch(n->n.startsWith(owner.substring(0,owner.length()-1))),"Grant owner must belong to the distinct test APK only");
+                // A separately launched test-UID provider cannot use the target's shared Kotlin
+                // runtime. Audit its real post-R8 code, not just the combined instrumentation loader.
+                Set<String> standalone=new HashSet<>(List.of(external,owner));
+                List<String> pending=new ArrayList<>(standalone);
+                for(int p=0;p<pending.size();p++) for(var edge:testIndex.edges) if(edge.caller.equals(pending.get(p))) {
+                    List<String> types=new ArrayList<>();
+                    if(edge.type!=null) types.add(edge.type);
+                    if(edge.member!=null) { types.add(edge.member.owner); types.addAll(edge.member.types); }
+                    for(String t:types) {
+                        while(t.startsWith("[")) t=t.substring(1);
+                        if(!t.startsWith("L") || t.startsWith("Landroid/") || t.startsWith("Ljava/")) continue;
+                        require(testClasses.contains(t),"External grant owner/provider requires class outside its standalone loader: "+t);
+                        if(standalone.add(t)) pending.add(t);
+                    }
+                }
+                P6aManifestAudit.check(app,tests);
+                for(String method:List.of("explicitModesAndNegativeAdmission","createTransactionCopyCompactRekey","readOnlyPipeVirtualAndStaleMetadata","grantLossReplacementAndProfileMismatch","positionalShortInterruptedAndErrorIo","dataForceDoesNotPublishNamespaceAndUnknownCreate","noBackupPublicationFaultsAndWholeRecords","aliasInterprocessLocksAndContinuousReopen","blockingIoRevokeRetainsOwnerUntilQuiescence","processRestartLocalLockAndBoundGenerationProgress","pickerCancellationStaleAndRequiredFlags","corruptLostAndVersionedLocalStateNeverReset","switchRevocationLostAckAndDistinctRecoveryCredentials"))
+                    require((testIndex.classes.get(p6aSuite).methods.getOrDefault(method+"()V",0)&1)!=0,"P6a runtime method missing: "+method);
+                for(String type:List.of("ControlledDocumentsProvider","P6aHelperService","P6aProviderProbeActivity","HarnessFaults","ProviderRestartFaults"))
+                    require(appClasses.contains("Lcom/fantadrom/copperscroll/p6aharness/"+type+";"),"P6a target harness missing: "+type);
+            } else require(appClasses.stream().noneMatch(n->n.startsWith("Lcom/fantadrom/copperscroll/p6aharness/")),"P6a harness present without opt-in");
             String p5bSuite="Lcom/fantadrom/copperscroll/storage/runtime/P5bChangeSecretRuntimeTest;";
             require(testClasses.contains(p5bSuite) && !appClasses.contains(p5bSuite),"P5b suite must belong to test APK only");
             for(String method:List.of("mainOnlyAndCompatibility","mainRekeyPreservesDecoy","decoyRekeyPreservesMain",
@@ -111,7 +160,8 @@ public final class VerifyRuntimeApks {
             require(testClasses.contains("Lcom/fantadrom/copperscroll/storage/runtime/P2KdfBenchmark;") == benchmark,
                 "KDF benchmark must be compiled only for the explicit benchmark profile");
             for (String name : testClasses) {
-                require(!name.startsWith("Lcom/fantadrom/copperscroll/storage/access/") &&
+                require(!name.startsWith("Lcom/fantadrom/copperscroll/storage/android/") &&
+                    !name.startsWith("Lcom/fantadrom/copperscroll/storage/access/") &&
                     !name.startsWith("Lcom/fantadrom/copperscroll/storage/format/") &&
                     !name.startsWith("Lcom/fantadrom/copperscroll/storage/io/") &&
                     !name.startsWith("Lcom/fantadrom/copperscroll/storage/transaction/") &&
