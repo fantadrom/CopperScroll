@@ -4,6 +4,11 @@
 master `5f91b77ca47ff38352060a64daa118ecb9733656`, tree
 `b34a1b2fcc9b37372c873f1d9d6ac9e2fed12463`. Проверено наличие merge PR №11 и
 предка `0f1c43fea9047be197fb58e9cb712f07c906aeb9`; исходное дерево чистое.
+Опубликован [Draft PR №12](https://github.com/fantadrom/CopperScroll/pull/12).
+Реализация: commit `127619afa37b0bea43f2e790d2454831c7cec183`,
+Git tree `91362a64afd5bba516d951792d5099e566f1bf6f`; последующий commit
+добавляет только эту публикационную запись. Master не изменён.
+
 AGENTS.md в репозитории/родителях не найден. Прочитаны design/format/resolution/
 test/prototype/P4 extension, P1–P5a reports и соответствующий engine/runtime code.
 
