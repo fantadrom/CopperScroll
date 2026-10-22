@@ -31,13 +31,14 @@ abstract class GenerateP1RuntimeApi : JavaExec() {
 val p2KdfBenchmark = providers.gradleProperty("p2KdfBenchmark").orElse("false").get().toBooleanStrict()
 val p2ReleaseRuntime = providers.gradleProperty("p2ReleaseRuntime").orElse("false").get().toBooleanStrict()
 val p3ReleaseRuntime = providers.gradleProperty("p3ReleaseRuntime").orElse("false").get().toBooleanStrict()
+val p5bReleaseRuntime = providers.gradleProperty("p5bReleaseRuntime").orElse("false").get().toBooleanStrict()
 val p5aReleaseRuntime = providers.gradleProperty("p5aReleaseRuntime").orElse("false").get().toBooleanStrict()
 val p4ReleaseRuntime = providers.gradleProperty("p4ReleaseRuntime").orElse("false").get().toBooleanStrict()
 val p1RuntimeRequested = providers.gradleProperty("p1ReleaseRuntime").orElse("false").get().toBooleanStrict()
-check(listOf(p1RuntimeRequested,p2ReleaseRuntime,p2KdfBenchmark,p3ReleaseRuntime,p4ReleaseRuntime,p5aReleaseRuntime).count { it } <= 1) { "Select one correctness suite OR explicit benchmark" }
-val p1ReleaseRuntime = p1RuntimeRequested || p2ReleaseRuntime || p2KdfBenchmark || p3ReleaseRuntime || p4ReleaseRuntime || p5aReleaseRuntime
-val cryptoRuntimeProfile = if(p5aReleaseRuntime) "p5a" else if(p4ReleaseRuntime) "p4" else if(p3ReleaseRuntime) "p3" else if (p2KdfBenchmark) "p2-benchmark" else if (p2ReleaseRuntime) "p2" else null
-val runtimeReports = if(p5aReleaseRuntime) "p5a-runtime" else if(p4ReleaseRuntime) "p4-runtime" else if(p3ReleaseRuntime) "p3-runtime" else if (p2KdfBenchmark) "p2-benchmark" else if (p2ReleaseRuntime) "p2-runtime" else "p1-runtime"
+check(listOf(p1RuntimeRequested,p2ReleaseRuntime,p2KdfBenchmark,p3ReleaseRuntime,p4ReleaseRuntime,p5aReleaseRuntime,p5bReleaseRuntime).count { it } <= 1) { "Select one correctness suite OR explicit benchmark" }
+val p1ReleaseRuntime = p1RuntimeRequested || p2ReleaseRuntime || p2KdfBenchmark || p3ReleaseRuntime || p4ReleaseRuntime || p5aReleaseRuntime || p5bReleaseRuntime
+val cryptoRuntimeProfile = if(p5bReleaseRuntime) "p5b" else if(p5aReleaseRuntime) "p5a" else if(p4ReleaseRuntime) "p4" else if(p3ReleaseRuntime) "p3" else if (p2KdfBenchmark) "p2-benchmark" else if (p2ReleaseRuntime) "p2" else null
+val runtimeReports = if(p5bReleaseRuntime) "p5b-runtime" else if(p5aReleaseRuntime) "p5a-runtime" else if(p4ReleaseRuntime) "p4-runtime" else if(p3ReleaseRuntime) "p3-runtime" else if (p2KdfBenchmark) "p2-benchmark" else if (p2ReleaseRuntime) "p2-runtime" else "p1-runtime"
 
 android {
     namespace = "com.fantadrom.copperscroll"
@@ -56,7 +57,7 @@ android {
         testInstrumentationRunnerArguments["p1ExpectedVariant"] = if (p1ReleaseRuntime) "p1Release" else "debug"
         if (p1ReleaseRuntime) {
             testInstrumentationRunnerArguments["class"] = "com.fantadrom.copperscroll.storage.runtime." +
-                if(p5aReleaseRuntime) "P5aMaintenanceRuntimeTest" else if(p4ReleaseRuntime) "P4VfsCardRuntimeTest" else if(p3ReleaseRuntime) "P3TransactionRuntimeTest" else if (p2KdfBenchmark) "P2KdfBenchmark" else if (p2ReleaseRuntime) "P2CryptoRuntimeTest" else "P1BackendRuntimeTest"
+                if(p5bReleaseRuntime) "P5bChangeSecretRuntimeTest" else if(p5aReleaseRuntime) "P5aMaintenanceRuntimeTest" else if(p4ReleaseRuntime) "P4VfsCardRuntimeTest" else if(p3ReleaseRuntime) "P3TransactionRuntimeTest" else if (p2KdfBenchmark) "P2KdfBenchmark" else if (p2ReleaseRuntime) "P2CryptoRuntimeTest" else "P1BackendRuntimeTest"
         }
         if (p2KdfBenchmark) {
             for ((key, fallback) in mapOf("p2BenchmarkMemoryKiB" to "16384", "p2BenchmarkIterations" to "2",
@@ -139,7 +140,7 @@ val compileP1ResultVerifier = tasks.register<JavaCompile>("compileP1ResultVerifi
     source(rootProject.file("tools/p1/VerifyRuntimeResults.java"), rootProject.file("tools/p1/VerifyRuntimeResultsTest.java"),
         rootProject.file("tools/p2/VerifyP2RuntimeResultsTest.java"), rootProject.file("tools/p3/VerifyP3RuntimeResultsTest.java"),
         rootProject.file("tools/p4/RuntimeSourceIdentity.java"),rootProject.file("tools/p4/VerifyP4RuntimeResultsTest.java"),
-        rootProject.file("tools/p4/RuntimeSourceIdentityTest.java"),rootProject.file("tools/p5a/VerifyP5aRuntimeResultsTest.java"))
+        rootProject.file("tools/p4/RuntimeSourceIdentityTest.java"),rootProject.file("tools/p5a/VerifyP5aRuntimeResultsTest.java"),rootProject.file("tools/p5b/VerifyP5bRuntimeResultsTest.java"))
     classpath = p1ResultProtocol
     destinationDirectory.set(layout.buildDirectory.dir("p1-result-verifier/classes"))
     options.release.set(11)
@@ -188,9 +189,17 @@ val testP5aRuntimeResults = tasks.register<JavaExec>("testP5aRuntimeResults") {
 }
 tasks.named("check") { dependsOn(testP5aRuntimeResults) }
 
+val testP5bRuntimeResults = tasks.register<JavaExec>("testP5bRuntimeResults") {
+    group = "verification"
+    dependsOn(compileP1ResultVerifier)
+    classpath = files(compileP1ResultVerifier.flatMap { it.destinationDirectory },p1ResultProtocol)
+    mainClass.set("VerifyP5bRuntimeResultsTest")
+}
+tasks.named("check") { dependsOn(testP5bRuntimeResults) }
+
 if (p1ReleaseRuntime) {
     val p4IdentityFile = layout.buildDirectory.file("reports/$runtimeReports/build-identity.properties")
-    val captureP4BuildIdentity = if(p4ReleaseRuntime || p5aReleaseRuntime) tasks.register<JavaExec>("captureP4BuildIdentity") {
+    val captureP4BuildIdentity = if(p4ReleaseRuntime || p5aReleaseRuntime || p5bReleaseRuntime) tasks.register<JavaExec>("captureP4BuildIdentity") {
         dependsOn(compileP1ResultVerifier)
         classpath = files(compileP1ResultVerifier.flatMap { it.destinationDirectory },p1ResultProtocol)
         mainClass.set("RuntimeSourceIdentity")
@@ -269,7 +278,7 @@ if (p1ReleaseRuntime) {
                 .map { jar.parentFile.resolve("optional/$it") }.filter { it.isFile }.map { it.absolutePath }
         })
     }
-    val verifyP4BuildIdentity = if(p4ReleaseRuntime || p5aReleaseRuntime) tasks.register<JavaExec>("verifyP4BuildIdentity") {
+    val verifyP4BuildIdentity = if(p4ReleaseRuntime || p5aReleaseRuntime || p5bReleaseRuntime) tasks.register<JavaExec>("verifyP4BuildIdentity") {
         dependsOn(verifyP1ReleaseApks,checkNotNull(captureP4BuildIdentity))
         classpath = files(compileP1ResultVerifier.flatMap { it.destinationDirectory },p1ResultProtocol)
         mainClass.set("RuntimeSourceIdentity")
@@ -280,8 +289,9 @@ if (p1ReleaseRuntime) {
         dependsOn(verifyP1ReleaseApks, testP1RuntimeResults)
         if (cryptoRuntimeProfile != null) dependsOn(testP2RuntimeResults)
         if (p3ReleaseRuntime) dependsOn(testP3RuntimeResults)
-        if (p4ReleaseRuntime || p5aReleaseRuntime) dependsOn(testP4RuntimeResults,testP4SourceIdentity,checkNotNull(verifyP4BuildIdentity))
-        if (p5aReleaseRuntime) dependsOn(testP5aRuntimeResults)
+        if (p4ReleaseRuntime || p5aReleaseRuntime || p5bReleaseRuntime) dependsOn(testP4RuntimeResults,testP4SourceIdentity,checkNotNull(verifyP4BuildIdentity))
+        if (p5aReleaseRuntime || p5bReleaseRuntime) dependsOn(testP5aRuntimeResults)
+        if (p5bReleaseRuntime) dependsOn(testP5bRuntimeResults)
         classpath = files(compileP1ResultVerifier.flatMap { it.destinationDirectory }, p1ResultProtocol)
         mainClass.set("VerifyRuntimeResults")
         args("prepare", layout.buildDirectory.get().asFile.absolutePath,
@@ -293,7 +303,7 @@ if (p1ReleaseRuntime) {
         dependsOn(prepareP1RuntimeRun)
         outputs.upToDateWhen { false }
     }
-    tasks.register<JavaExec>(if(p5aReleaseRuntime) "p5aReleaseRuntimeCheck" else if(p4ReleaseRuntime) "p4ReleaseRuntimeCheck" else if(p3ReleaseRuntime) "p3ReleaseRuntimeCheck" else if (p2KdfBenchmark) "p2KdfBenchmarkCheck" else if (p2ReleaseRuntime) "p2ReleaseRuntimeCheck" else "p1ReleaseRuntimeCheck") {
+    tasks.register<JavaExec>(if(p5bReleaseRuntime) "p5bReleaseRuntimeCheck" else if(p5aReleaseRuntime) "p5aReleaseRuntimeCheck" else if(p4ReleaseRuntime) "p4ReleaseRuntimeCheck" else if(p3ReleaseRuntime) "p3ReleaseRuntimeCheck" else if (p2KdfBenchmark) "p2KdfBenchmarkCheck" else if (p2ReleaseRuntime) "p2ReleaseRuntimeCheck" else "p1ReleaseRuntimeCheck") {
         group = "verification"
         description = "Run fresh $runtimeReports processed-APK tests and enforce its exact suite on EVERY selected device."
         dependsOn(connectedP1)

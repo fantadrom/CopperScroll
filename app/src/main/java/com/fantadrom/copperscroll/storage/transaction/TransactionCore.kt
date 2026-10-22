@@ -439,7 +439,8 @@ class TransactionCore internal constructor(val owner: ResourceOwner, private val
                     requireIo(local.durableLocalState,IoCode.UnsupportedDurability)
                     val state = local.read(); val journal = state.journal
                     pin = local.reconciliationRequired || (journal != null &&
-                        (journal.stage !in listOf(JournalStage.Activated,JournalStage.Aborted) || journal.outcome == JournalOutcome.Unreported))
+                        (journal.kind !in setOf("compact","rekey") || (journal.kind == "rekey" && journal.zones.size != 1) ||
+                         journal.stage !in listOf(JournalStage.Activated,JournalStage.Aborted) || journal.outcome == JournalOutcome.Unreported))
                     requireIo(!pin,IoCode.Busy)
                     val binding = state.binding ?: throw StoreException(IoCode.AccessLost)
                     val actual = com.fantadrom.copperscroll.storage.maintenance.fingerprint(owner.store,binding.uri,check={ owner.check(permit) })

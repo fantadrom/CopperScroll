@@ -12,7 +12,10 @@ Git tree `941192c024dae36dfc46acf980dda120a8785dba`; последующий comm
 Прочитаны design/format/resolution/test/prototype/P4-extension, актуальные P1–P4
 reports, IO/owner/local state/T/VFS/reader/recovery и runtime gates.
 
-**Статус: реализация и проверки headless synthetic/model P5a; Android NOT_RUN.**
+**Исторический статус агента при реализации: headless synthetic/model P5a; Android NOT_RUN.**
+Текущая приёмка P5a зафиксирована ниже в разделе
+[пользовательского подтверждения](#пользовательское-подтверждение-android-22-октября-2026);
+прежние результаты/открытые на тот момент условия ниже сохранены как история.
 Ни прежние пользовательские PASS, ни build/audit не заменяют P5a runtime. Provider
 allowlist по-прежнему пуст. P5 целиком не завершён: rekey с новым ZDK — P5b.
 
@@ -400,3 +403,38 @@ failures/errors/skipped=0, `runtime=PASS`, итоговый BUILD SUCCESSFUL.
 До этих двухустройственных runtime результатов P5a не принят, PR Draft.
 P5b новый ZDK/re-encrypt, P6a SAF/durability/power-loss, P6b lifecycle/leaks/OEM и
 P6c рабочий UI остаются отдельными gates. Master/PR агент не сливает.
+
+
+## Пользовательское подтверждение Android, 22 октября 2026
+
+Пользователь выполнил проверки на Windows для commit
+`0f1c43fea9047be197fb58e9cb712f07c906aeb9`, затем слил PR №11 в master.
+Агент проверил предоставленный `results.zip`: все пять receipts содержат
+`runtime=PASS`; P5a XML содержат восемь реальных ожидаемых testcase на каждом
+устройстве, failures/errors/skipped=0; runner exit code=0. Это пользовательское
+исполнение, не Android-прогон агента. Исторический agent NOT_RUN выше сохранён.
+
+| Suite | Honor ABR-LX1 Android 15 | Virtual Pixel 6 Android 17 |
+|---|---|---|
+| P5a | 8/8 PASS | 8/8 PASS |
+| P1 | 7/7 PASS | 7/7 PASS |
+| P2 | 8/8 PASS | 8/8 PASS |
+| P3 | 8/8 PASS | 8/8 PASS |
+| P4 | 10/10 PASS | 10/10 PASS |
+
+Во всех receipts failures/errors/skipped=0. Одна APK-пара:
+`artifactBundleId=074c123437a80efb64e9e6c72d054a04c64f101aa4e312e81e04b9cb7b0e8251`.
+Target SHA256 `c4b49292480de8cf9a352cdc35bea86e57b52e1cbd56514544ef27d181bc3069`,
+test SHA256 `e68d19a55d7b0909817e3b25f84c5a7c655f7a06aa0f32afa940c8f5ceb4056a`.
+P5a `runId=809acb64-86c6-4491-9f78-656245a45d3d`,
+`sourceFingerprint=032b16e1ac753fea6bdcbdc504d13e8a6ff2a5e808c2f31b6c5b6ff93a391935`.
+Фактическая среда: Gradle 9.6.0, JetBrains JVM
+`25.0.3+-15898627-b508.16`; `sourceCodeDirty=false`,
+`sourceDirty=true`, `workingTreeDirty=true`, `wrapperModified=true`.
+Локальное отличие wrapper properties сохранено в provenance, не скрыто и не
+перенесено в нормативный wrapper репозитория.
+
+Двухустройственный runtime gate P5a и необходимые регрессии P1–P4 для этой версии
+закрыты. Ограничения p1Release относительно ordinary release, optimization scope
+и границы synthetic/provider/power-loss/lifecycle сохраняются. Эти результаты
+не подтверждают новую реализацию P5b: для неё нужны отдельные свежие прогоны.

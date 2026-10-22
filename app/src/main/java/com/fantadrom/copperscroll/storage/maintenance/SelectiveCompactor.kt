@@ -3,7 +3,6 @@ package com.fantadrom.copperscroll.storage.maintenance
 import com.fantadrom.copperscroll.storage.crypto.ZoneKey
 import com.fantadrom.copperscroll.storage.format.*
 import com.fantadrom.copperscroll.storage.io.*
-import java.util.TreeMap
 
 /** Contains only public record identifiers, no plaintext or keys. */
 internal class CompactionPlan(val source: ReadSnapshot, val retained: List<Set<Bytes>>) {
@@ -60,8 +59,6 @@ internal class SelectiveCompactor {
         checkFormat(a.containerId == s.containerId && a.instanceId == expectedInstance && a.instanceId != s.instanceId &&
             a.generation == s.generation+1 && a.minor == s.minor && a.committedLength == destination.size && a.zones.size == s.zones.size)
         checkFormat(destination.readFullyAt(0,65536).contentEquals(destination.readFullyAt(65536,65536)))
-        val ranges = TreeMap<Long,Long>()
-        fun range(p: PhysicalRef) { checkFormat(ranges.put(p.offset,p.length) == null) }
         for((i,d) in a.zones.withIndex()) {
             check(); val original = s.zones[i]
             checkFormat(DescriptorCodec.logicalBytes(d).contentEquals(DescriptorCodec.logicalBytes(original)) && d.logicalMac == original.logicalMac)
@@ -77,23 +74,10 @@ internal class SelectiveCompactor {
                     val x = source.readFullyAt(old.offset+pos,n); val y = destination.readFullyAt(p.offset+pos,n)
                     try { checkFormat(x.contentEquals(y)) } finally { x.fill(0); y.fill(0) }; pos += n
                 }
-                range(p)
             }
-            fun pages(ref: PhysicalRef) {
-                check(); range(ref)
-                val page = CatalogueCodec.decode(destination.readFullyAt(ref.offset,Limits.PAGE),a.committedLength)
-                if(page.level > 0) page.entries.forEach { pages(it.child!!) }
-            }
-            pages(d.catalogue)
             keys[d.zoneId]?.let { checkFormat(reader.reachable(actual,it) == plan.retained[i]) }
         }
-        var end = 131072L
-        for((offset,length) in ranges) {
-            check(); checkFormat(offset == aligned(end))
-            if(offset > end) checkFormat(destination.readFullyAt(end,(offset-end).toInt()).all { it == 0.toByte() })
-            end = offset+length
-        }
-        checkFormat(end == a.committedLength)
+        verifyPhysicalPartition(destination,actual,check)
         return SnapshotCopier().verify(destination,actual,keys,check)
     }
 }

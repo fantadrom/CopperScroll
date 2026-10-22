@@ -35,15 +35,17 @@ class SnapshotCopier {
             created(artifact)
             val permit = owner.accept()
             return owner.execute(permit) {
+                requireDurableArtifact(owner.store)
                 var pos = 0L
                 while(pos < snapshot.header.committedLength) {
                     check(); val b = sourceOwner.store.readFullyAt(pos,minOf(65536L,snapshot.header.committedLength-pos).toInt())
                     try { owner.store.writeFullyAt(pos,b) } finally { b.fill(0) }; pos += b.size
                 }
                 requireIo(owner.store.size == snapshot.header.committedLength,IoCode.Eio)
-                requireIo(owner.store.guarantees.durableCreateIdentity,IoCode.UnsupportedDurability)
+                requireDurableArtifact(owner.store)
                 check(); owner.store.force(); check(); owner.store.forceIdentity()
                 owner.reopen(permit) { documents.open(artifact) }
+                requireDurableArtifact(owner.store)
                 check(); documents.checkIdentity(artifact)
                 val s = ContainerReader(owner.store,accessCheck=check).snapshot()
                 val after = fingerprint(owner.store,artifact.uri,s,check)
