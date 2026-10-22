@@ -51,6 +51,7 @@ class TransactionCore internal constructor(val owner: ResourceOwner, private val
     private val tokens = LinkedHashMap<Bytes,OperationToken>()
     private var snapshot: ReadSnapshot? = null
     private var key: ZoneKey? = null
+    private var keyResource: AutoCloseable? = null
     private var revision = 0L
     private var pending: Pending? = null
     @Synchronized fun attach(ownedKey: ZoneKey): ZoneView {
@@ -58,8 +59,63 @@ class TransactionCore internal constructor(val owner: ResourceOwner, private val
         return owner.execute(permit) { checking(permit) {
             requireIo(key == null)
             val s = reader.snapshot(); val view = reader.openZone(s,ownedKey)
-            owner.check(permit); owner.adopt(ownedKey); key = ownedKey; snapshot = s; view
+            owner.check(permit); owner.adopt(ownedKey); key = ownedKey; keyResource = ownedKey; snapshot = s; view
         } }
+    }
+    /** Opaque capability minted from the attached authenticated key; caller cannot select a role. */
+    class MaintenanceCapability internal constructor()
+    private val maintenanceCapability = MaintenanceCapability()
+    @Synchronized fun authorizeMaintenance(): MaintenanceCapability {
+        requireIo(!owner.accessRevoked && !owner.reconciliationRequired && key?.role == 1,IoCode.AccessLost)
+        return maintenanceCapability
+    }
+    @Synchronized internal fun <T> maintenanceAccess(capability: MaintenanceCapability, freeze: Boolean = false, admission: ()->Unit = {},
+        block: (ReadSnapshot,ZoneKey,ContainerReader,WritePermit)->T): T {
+        requireIo(capability === maintenanceCapability && key?.role == 1,IoCode.AccessLost)
+        // Reject undrained work rather than silently dropping a prepared save or replaying Unknown.
+        requireIo(pending == null && tokens.values.none { it.outcome == null },IoCode.Busy)
+        val permit = owner.accept()
+        admission() // short request/confirmation epoch check, BEFORE any freeze or source IO
+        return owner.execute(permit) { checking(permit) {
+            if(freeze) owner.beginMaintenance(permit)
+            try {
+                owner.check(permit)
+                val s = snapshot ?: throw StoreException(IoCode.AccessLost)
+                val actual = try { reader.snapshot() } catch(e: FormatException) {
+                    throw StoreException(IoCode.InvalidRange).also { it.addSuppressed(e) }
+                }
+                requireIo(actual.headerBytes == s.headerBytes && actual.observedLength == s.observedLength,IoCode.InvalidRange)
+                block(actual,key!!,reader,permit)
+            } finally { if(freeze) owner.stopMaintenanceAdmission() }
+        } }
+    }
+    private var maintenanceTicket: Any? = null
+    private var maintenanceContext: AutoCloseable? = null
+    @Synchronized internal fun newMaintenanceTicket(): Any {
+        requireIo(!owner.accessRevoked && key?.role == 1,IoCode.AccessLost)
+        val previous = maintenanceContext; maintenanceContext = null
+        previous?.let { owner.retire(it) }
+        return Any().also { maintenanceTicket = it }
+    }
+    @Synchronized internal fun checkMaintenanceTicket(ticket: Any, context: AutoCloseable? = null) {
+        requireIo(!owner.accessRevoked && key?.role == 1,IoCode.AccessLost)
+        com.fantadrom.copperscroll.storage.maintenance.refuse(maintenanceTicket === ticket &&
+            (context == null || maintenanceContext === context),com.fantadrom.copperscroll.storage.maintenance.MaintenanceCode.Denied)
+    }
+    @Synchronized internal fun setMaintenanceContext(ticket: Any, context: AutoCloseable?) {
+        checkMaintenanceTicket(ticket)
+        val previous = maintenanceContext; maintenanceContext = context
+        if(context != null) owner.adopt(context)
+        previous?.let { owner.retire(it) }
+    }
+    /** IO may remain pinned for reconciliation, but the revoked session no longer needs a key. */
+    @Synchronized internal fun endMaintenanceSession() {
+        requireIo(owner.accessRevoked,IoCode.AccessLost)
+        val context = maintenanceContext; maintenanceContext = null; maintenanceTicket = null
+        context?.let { owner.retire(it) }
+        val resource = keyResource; keyResource = null
+        if(resource != null) owner.retire(resource) else key?.close()
+        key = null; snapshot = null; tokens.clear()
     }
     @Synchronized fun issueCreate(prepared: PreparedZone, hint: String = "", containerMinor: Int = 1): OperationToken {
         requireIo(snapshot == null && key == null && store.size == 0L)
@@ -301,7 +357,7 @@ class TransactionCore internal constructor(val owner: ResourceOwner, private val
     }
     private fun finish(actual: ReadSnapshot): WriteOutcome {
         val p = pending!!; snapshot = actual; revision = p.revision
-        if(key == null) key = p.zoneKey
+        if(key == null) { key = p.zoneKey; keyResource = (p.token.request as? NewZone)?.prepared ?: p.zoneKey }
         val result = WriteOutcome(WriteCode.Committed,actual.header.generation,p.sequence,p.revision,p.resultObjectId,p.overflow)
         pending = null; owner.resolved()
         return terminal(p.token,result)
@@ -373,6 +429,29 @@ class TransactionCore internal constructor(val owner: ResourceOwner, private val
     }
     override fun close() { owner.close() }
     companion object {
+        /** Required entry point for files controlled by binding+journal. Low-level constructors are
+         * retained for synthetic P3 fixtures, never an alternative application opening policy. */
+        fun openBound(owner: ResourceOwner, local: LocalStateStore, ownedKey: ZoneKey): TransactionCore {
+            var pin = false
+            try {
+                val permit = owner.accept()
+                owner.execute(permit) {
+                    requireIo(local.durableLocalState,IoCode.UnsupportedDurability)
+                    val state = local.read(); val journal = state.journal
+                    pin = local.reconciliationRequired || (journal != null &&
+                        (journal.stage !in listOf(JournalStage.Activated,JournalStage.Aborted) || journal.outcome == JournalOutcome.Unreported))
+                    requireIo(!pin,IoCode.Busy)
+                    val binding = state.binding ?: throw StoreException(IoCode.AccessLost)
+                    val actual = com.fantadrom.copperscroll.storage.maintenance.fingerprint(owner.store,binding.uri,check={ owner.check(permit) })
+                    requireIo(com.fantadrom.copperscroll.storage.maintenance.sameBindingDocument(binding,actual),IoCode.AccessLost)
+                }
+                return TransactionCore(owner).also { it.attach(ownedKey) }
+            } catch(e: Throwable) {
+                ownedKey.close(); if(pin) owner.markUnknown(); owner.revoke()
+                if(!pin) try { owner.release() } catch(cleanup: Throwable) { e.addSuppressed(cleanup) }
+                throw e
+            }
+        }
         private fun randomId() = Bytes(SystemEntropy().bytes(16,true))
         private fun ioCode(e: StoreException) = when(e.code) {
             IoCode.AccessLost,IoCode.Closed -> WriteCode.AccessLost

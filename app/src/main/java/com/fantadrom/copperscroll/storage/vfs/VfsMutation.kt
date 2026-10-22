@@ -237,7 +237,7 @@ internal class VfsMutation(private val stamp: ZoneStamp, private val command: St
         // All metadata/graph/field checks above are complete. IO below only builds immutable COW.
         pendingBodyObject?.let { o ->
             val b = pendingBody!!; val refs = writeBody(b,o.id)
-            val payload: ObjectPayload = if(o.type == 2) NotePayload(b.size.toLong(),refs,cursor) else CardPayload(b.size.toLong(),refs)
+            val payload: ObjectPayload = if(o.type == 2) NotePayload(b.size.toLong(),refs,cursor) else CardPayload(b.size.toLong(),refs,(o.payload as? CardPayload)?.useAsUserTemplate ?: false)
             update(withPayload(o,payload))
         }
         pendingMedia?.let { o -> update(withPayload(o,MediaStreams.write(context,o.id,source!!,mime!!))) }

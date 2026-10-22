@@ -47,7 +47,7 @@ class FileChannelStore private constructor(private val channel: FileChannel, pri
         catch (_: IOException) { throw StoreException(IoCode.Eio) }
     companion object {
         private val handles = HashSet<StoreIdentity>()
-        private fun identity(path: Path): StoreIdentity {
+        internal fun identityOf(path: Path): StoreIdentity {
             val attributes = Files.readAttributes(path,BasicFileAttributes::class.java)
             return StoreIdentity("jvm-file",attributes.fileKey()?.toString() ?: path.toRealPath().toString())
         }
@@ -59,9 +59,9 @@ class FileChannelStore private constructor(private val channel: FileChannel, pri
             synchronized(handles) {
                 var channel: FileChannel? = null; var selected: StoreIdentity? = null
                 return try {
-                    if(!createNew) { selected = identity(absolute); requireIo(selected !in handles,IoCode.Busy) }
+                    if(!createNew) { selected = identityOf(absolute); requireIo(selected !in handles,IoCode.Busy) }
                     channel = FileChannel.open(absolute, options)
-                    if(selected == null) selected = identity(absolute)
+                    if(selected == null) selected = identityOf(absolute)
                     requireIo(handles.add(selected),IoCode.Busy)
                     FileChannelStore(channel,absolute,StoreGuarantees(true, syntheticCreateIdentity),selected)
                 } catch(e: IOException) {

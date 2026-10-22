@@ -37,7 +37,10 @@ document chunk (note либо card), ownerId=objectId, ordinal0…n−1; это 
 семантики защищено minor2. Note1.1 не меняется. Новых record kinds нет.
 Сумма lengths равна bodyBytes. Metadata≤16KiB; тело не ограничено одной page.
 Reader/VerifyAll/recovery учитывают все card refs и их schema/AEAD. Unknown не пустота.
-P4 пишет useAsUserTemplate=false; true — Unsupported, не команда очистки значений.
+P4 пишет useAsUserTemplate=false. Уточнение P5a от21 октября2026: reader1.2
+распознаёт true, сохраняет флаг и все заполненные значения при copy/compact и
+несвязанном save; setter/UI пользовательских шаблонов не добавлены. Это уже заданный
+Boolean, не неизвестная схема и не команда очистки значений.
 Будущие пользовательские шаблоны могут переносить значения полностью/частично.
 
 ## 3. Поля, defaults и лимиты

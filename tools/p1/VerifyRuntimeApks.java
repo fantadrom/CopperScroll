@@ -85,6 +85,16 @@ public final class VerifyRuntimeApks {
                     "namespaceAndLocalStateDurability", "catalogueSplitsAndLimits", "boundedStoreAndConflict"))
                 require((testIndex.classes.get(p3Suite).methods.getOrDefault(method+"()V",0) & 1) != 0,
                     "P3 expected runtime method missing: " + method);
+            String p5aSuite="Lcom/fantadrom/copperscroll/storage/runtime/P5aMaintenanceRuntimeTest;";
+            require(testClasses.contains(p5aSuite) && !appClasses.contains(p5aSuite),"P5a suite must belong to test APK only");
+            for(String method:List.of("selectiveZonesAndIndependentReaders","authorizationCredentialsAndNoEffects",
+                "committedLengthCopyAndCoverage","restartAndLostAcknowledgement","revokeSwitchAndExclusiveLease",
+                "faultCopyBuildAndJournal","retentionSizesAndFailures","largeMediaAndMainOnlyCompatibility"))
+                require((testIndex.classes.get(p5aSuite).methods.getOrDefault(method+"()V",0)&1)!=0,"P5a expected runtime method missing: "+method);
+            for(String type:List.of("SnapshotCopier","MaintenanceCoordinator","MaintenanceRecovery","SelectiveCompactor")) {
+                String descriptor="Lcom/fantadrom/copperscroll/storage/maintenance/"+type+";";
+                require(appClasses.contains(descriptor),"P5a backend missing from target: "+type);
+            }
             String p4Suite="Lcom/fantadrom/copperscroll/storage/runtime/P4VfsCardRuntimeTest;";
             require(testClasses.contains(p4Suite) && !appClasses.contains(p4Suite),"P4 suite must belong to test APK only");
             for(String method:List.of("vfsBatchDepthTrash","noteRichTextRevision","cardFieldRoundTripAndGolden","cardAtomicSaveAndDraft",
@@ -100,6 +110,7 @@ public final class VerifyRuntimeApks {
                     !name.startsWith("Lcom/fantadrom/copperscroll/storage/transaction/") &&
                     !name.startsWith("Lcom/fantadrom/copperscroll/storage/vfs/") &&
                     !name.startsWith("Lcom/fantadrom/copperscroll/storage/cards/") &&
+                    !name.startsWith("Lcom/fantadrom/copperscroll/storage/maintenance/") &&
                     !name.startsWith("Lcom/fantadrom/copperscroll/storage/crypto/") && !name.startsWith("Lorg/bouncycastle/") &&
                     !name.startsWith("Lcom/ibm/icu/") && !name.startsWith("Lco/nstant/in/cbor/"),
                     "Instrumentation APK contains a second backend implementation");

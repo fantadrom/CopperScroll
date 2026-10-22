@@ -1,8 +1,8 @@
 # Copper Scroll: архитектура защищённого контейнера
 
 Статус: базовая спецификация1.1 и явное [расширение P4/1.2](container-p4-extension.md).
-P1…P3 реализованы на синтетических данных; headless P4 подготовлен, Android runtime
-остаётся отдельным условием приёмки. Правила карточек/совместимости/лимитов
+P1…P4 имеют пользовательские Android runtime receipts. Headless P5a copy/compact
+реализован; [новые runtime gates](validation/p5a-report.md) ещё открыты. Правила карточек/совместимости/лимитов
 из расширения имеют приоритет над ограничениями базового reader1.1 ниже.
 Дата: 18 октября 2026. Нормативный формат: [container-format-v1.md](container-format-v1.md).
 Проверки: [container-test-plan.md](container-test-plan.md). Задание разработчику:
@@ -489,6 +489,24 @@ version — отказ записи всего файла. Unknown selected reac
 понятных внешних descriptor/catalogue/record framing и поддержанных envelope1/S1/KDF/record1 обеих зон; unknown plaintext невыбранной не интерпретировать. Не предполагать relocation policy неизвестного envelope. Порчу не закреплять writer.
 Recovery исправной зоны — отдельный read-only алгоритм format§4.1. Migration
 отдельна, только известный переход+verified backup, не автоматически при compact.
+
+Уточнения реализации P5a (21 октября2026): metadata port LocalStateStore сохраняет
+одну binding+journal запись; local codec version2 добавляет реальные document
+identities и pending artifact (legacy1 читается), portable container не меняется.
+Binding выбирает документ; его fingerprint — последний наблюдённый checkpoint.
+Обычная T не пишет sidecar: generation того же URI/identity/container/instance
+может вырасти, текущая зона проверяется новым входом. При равной generation
+fingerprint обязан совпасть. journal.source — точный frozen S операции, а
+previousBinding может содержать более ранний checkpoint. Отдельного источника
+истины/ACK private metadata для обычной T нет. Maintenance hold держит lease
+через abort/cleanup, admission закрывается под core serializer до его освобождения.
+Новый main request ticket инвалидирует прежние confirmations/context, в том числе
+в другом coordinator на том же core.
+Новый app-level вход в journal-managed файл проходит TransactionCore.openBound;
+pending/Unreported/повреждённое состояние не выдаёт writer до explicit resolution.
+P5a maps ограничены32768 публичными records суммарно обеих зон (32MiB conservative
+1024B/record), streaming64KiB, без encrypted scratch; превышение до backup.
+Подробности/границы модели — [отчёт P5a](validation/p5a-report.md).
 
 ## 9. Готовность и экспериментальные условия
 

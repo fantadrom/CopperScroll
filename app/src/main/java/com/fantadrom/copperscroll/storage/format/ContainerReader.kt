@@ -142,7 +142,13 @@ class ContainerReader(private val store: RandomAccessStore, private val maxMapBy
             checkFormat(position == out.size); return out
         } catch(e: Throwable) { out.fill(0); throw e }
     }
-    private fun zone(snapshot: ReadSnapshot, key: ZoneKey, full: Boolean): ZoneView {
+    /** Full authenticated closure, including card chunks. No plaintext escapes this method. */
+    internal fun reachable(snapshot: ReadSnapshot, key: ZoneKey): Set<Bytes> {
+        val records = HashSet<Bytes>()
+        zone(snapshot,key,true,records)
+        return java.util.Collections.unmodifiableSet(records)
+    }
+    private fun zone(snapshot: ReadSnapshot, key: ZoneKey, full: Boolean, closure: MutableSet<Bytes>? = null): ZoneView {
         val i = snapshot.header.zones.indexOfFirst { it.zoneId == key.zoneId && it.role == key.role }
         checkFormat(i >= 0 && snapshot.header.containerId == key.containerId)
         val d = snapshot.header.zones[i]; crypto.verifyDescriptor(key,d)
@@ -153,7 +159,7 @@ class ContainerReader(private val store: RandomAccessStore, private val maxMapBy
         }
         fun plain(ref: LogicalRef): ByteArray {
             accessCheck()
-            checkFormat(visited.add(ref.recordId)) // cycles/repeated graph edges, not catalogue history
+            checkFormat(visited.add(ref.recordId)); closure?.add(ref.recordId) // cycles/repeated graph edges, not catalogue history
             checkFormat(mapBytes + visited.size*128L <= maxMapBytes,Failure.ResourceLimit)
             val physical = catalogue[ref.recordId] ?: throw FormatException(Failure.CorruptData)
             checkFormat(physical.hash == ref.hash)
@@ -229,6 +235,10 @@ class ContainerReader(private val store: RandomAccessStore, private val maxMapBy
                     }
                     is CardPayload -> {
                         cardBytes += payload.bodyBytes; checkFormat(cardBytes <= maxMapBytes,Failure.ResourceLimit)
+                        for(ref in payload.chunks) {
+                            checkFormat(visited.add(ref.recordId)); closure?.add(ref.recordId)
+                            checkFormat(mapBytes + visited.size*128L <= maxMapBytes,Failure.ResourceLimit)
+                        }
                         val b = readDocument(snapshot,key,o.id,payload.chunks,payload.bodyBytes,
                             com.fantadrom.copperscroll.storage.cards.CardLimits.BODY,true)
                         try { com.fantadrom.copperscroll.storage.cards.CardCodec.decode(b) } finally { b.fill(0) }
