@@ -75,7 +75,8 @@ class P4BoundaryTest {
             val old=view.objects.getValue(id); val obj=VfsMutation.withPayload(old,CardPayload(length.toLong(),listOf(chunk)))
             val objectFields=StrictCbor.decode(ObjectCodec.encode(obj,2)).arr().toMutableList()
             if(variant == 2) objectFields[0]=99
-            if(variant == 3) { val payload=objectFields[13].arr().toMutableList(); payload[3]=true; objectFields[13]=payload }
+            // P5a recognizes the existing template Boolean; keep this negative case on a future payload version.
+            if(variant == 3) { val payload=objectFields[13].arr().toMutableList(); payload[0]=99; objectFields[13]=payload }
             val objectRef=add(3,id,StrictCbor.encode(objectFields))
             val entries=view.objectRefs.map { (objectId,ref) -> IndexEntry(IndexKey(objectId),if(objectId == id) objectRef else ref) }.sortedBy { it.key }
             val objects=add(2,key.zoneId,IndexCodec.encode(IndexPage(1,0,entries),key.zoneId))

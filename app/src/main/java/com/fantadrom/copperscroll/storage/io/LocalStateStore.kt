@@ -7,23 +7,30 @@ import java.net.URI
 
 /** Safe identity/fingerprint metadata only. No password, key, plaintext, or command payload fields. */
 class DocumentFingerprint(val uri: String, val container: Bytes, val instance: Bytes, val generation: Long,
-                          val length: Long, val headersHash: Bytes, val fullHash: Bytes? = null) {
+                          val length: Long, val headersHash: Bytes, val fullHash: Bytes? = null, val identity: StoreIdentity? = null) {
     internal fun wire(): List<Any?> {
         val parsed = try { URI(uri) } catch(_: Exception) { throw FormatException(Failure.ValidationError) }
         checkFormat(uri.toByteArray(Charsets.UTF_8).size in 1..4096 && parsed.scheme in listOf("content","file","synthetic") &&
             parsed.userInfo == null && parsed.fragment == null)
         container.id(16); instance.id(16); headersHash.sized(32); fullHash?.sized(32)
         checkFormat(generation > 0 && length in 131072..Limits.FILE_MAX)
-        return listOf(uri,container,instance,generation,length,headersHash,fullHash)
+        return listOf(uri,container,instance,generation,length,headersHash,fullHash) +
+            if(identity == null) emptyList() else listOf(listOf(identity.namespace,identity.document))
     }
     override fun toString() = "DocumentFingerprint(redacted)"
+}
+class OwnedArtifactIdentity(val uri: String, val identity: StoreIdentity) {
+    internal fun wire() = listOf(uri,identity.namespace,identity.document).also {
+        checkFormat(uri.toByteArray(Charsets.UTF_8).size in 1..4096 && URI(uri).scheme in listOf("content","file","synthetic"))
+    }
 }
 enum class JournalStage { Prepared, BackupVerified, Building, CandidateVerified, SwitchIntent, Activated,
     Aborted, Unverified, ReconciliationRequired }
 enum class JournalOutcome { Pending, Confirmed, Unreported, Unknown, Aborted }
 class StateJournal(val opId: Bytes, val kind: String, val zones: List<Bytes>, val source: DocumentFingerprint,
                    val backup: DocumentFingerprint?, val candidate: DocumentFingerprint?, val stage: JournalStage,
-                   val previousBinding: DocumentFingerprint?, val outcome: JournalOutcome = JournalOutcome.Pending) {
+                   val previousBinding: DocumentFingerprint?, val outcome: JournalOutcome = JournalOutcome.Pending,
+                   val pendingArtifact: OwnedArtifactIdentity? = null) {
     internal fun wire(): List<Any?> {
         opId.id(16); checkFormat(kind.matches(Regex("[a-z][a-z0-9_-]{0,31}")))
         checkFormat(zones.size in 1..2 && zones.distinct().size == zones.size); zones.forEach { it.id(16) }
@@ -33,9 +40,16 @@ class StateJournal(val opId: Bytes, val kind: String, val zones: List<Bytes>, va
             checkFormat(candidate?.fullHash != null)
         checkFormat(backup?.uri != source.uri && candidate?.uri != source.uri &&
             (backup == null || candidate == null || backup.uri != candidate.uri))
-        if(outcome == JournalOutcome.Confirmed) checkFormat(stage == JournalStage.Activated)
+        if(outcome in listOf(JournalOutcome.Confirmed,JournalOutcome.Unreported)) checkFormat(stage == JournalStage.Activated)
         if(outcome == JournalOutcome.Aborted) checkFormat(stage == JournalStage.Aborted)
-        return listOf(opId,kind,zones,source.wire(),backup?.wire(),candidate?.wire(),stage.name,previousBinding?.wire(),outcome.name)
+        if(source.identity != null) {
+            checkFormat(backup?.identity != source.identity && candidate?.identity != source.identity &&
+                (backup?.identity == null || candidate?.identity == null || backup.identity != candidate.identity))
+            pendingArtifact?.let { pending -> checkFormat(pending.identity != source.identity && pending.identity != backup?.identity &&
+                (pending.identity != candidate?.identity || stage == JournalStage.Aborted) && stage !in listOf(JournalStage.CandidateVerified,JournalStage.SwitchIntent,JournalStage.Activated)) }
+        }
+        return listOf(opId,kind,zones,source.wire(),backup?.wire(),candidate?.wire(),stage.name,previousBinding?.wire(),outcome.name) +
+            if(pendingArtifact == null) emptyList() else listOf(pendingArtifact.wire())
     }
     override fun toString() = "StateJournal(stage=$stage)"
 }
@@ -49,7 +63,8 @@ object LocalStateCodec {
         if(journal?.stage == JournalStage.Activated) checkFormat(state.binding != null &&
             state.binding.wire() == journal.candidate?.wire())
         else if(journal != null) checkFormat(state.binding?.wire() == journal.previousBinding?.wire())
-        val body = StrictCbor.encode(listOf(1,state.binding?.wire(),journal?.wire()),MAX_BYTES-44)
+        val extended = listOf(state.binding,journal?.source,journal?.backup,journal?.candidate,journal?.previousBinding).any { it?.identity != null } || journal?.pendingArtifact != null
+        val body = StrictCbor.encode(listOf(if(extended) 2 else 1,state.binding?.wire(),journal?.wire()),MAX_BYTES-44)
         val framed = ByteBuffer.allocate(body.size+12).order(ByteOrder.LITTLE_ENDIAN)
             .put("CSLOCAL1".toByteArray(Charsets.US_ASCII)).putInt(body.size).put(body).array()
         return framed + sha(framed).copy()
@@ -60,20 +75,22 @@ object LocalStateCodec {
         val length = ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN).getInt(8)
         checkFormat(length > 0 && length == bytes.size-44)
         checkFormat(sha(bytes.copyOfRange(0,bytes.size-32)) == Bytes(bytes.copyOfRange(bytes.size-32,bytes.size)))
-        val a = StrictCbor.decode(bytes.copyOfRange(12,12+length),MAX_BYTES).arr(3); a[0].version()
+        val a = StrictCbor.decode(bytes.copyOfRange(12,12+length),MAX_BYTES).arr(3); checkFormat(a[0] in listOf(1uL,2uL),Failure.UnsupportedVersion)
         fun fingerprint(value: Any?): DocumentFingerprint? {
             if(value == null) return null
-            val p = value.arr(7)
+            val p = value.arr(); checkFormat(p.size == 7 || (a[0] == 2uL && p.size == 8))
             return DocumentFingerprint(p[0].text(4096),p[1].ident(),p[2].ident(),p[3].number(),p[4].number(Limits.FILE_MAX),
-                p[5].bin(32),p[6]?.bin(32)).also { it.wire() }
+                p[5].bin(32),p[6]?.bin(32),if(p.size == 8) p[7].arr(2).let { StoreIdentity(it[0].text(4096),it[1].text(4096)) } else null).also { it.wire() }
         }
         val binding = fingerprint(a[1])
-        val journal = a[2]?.arr(9)?.let { j ->
+        val journal = a[2]?.arr()?.let { j ->
+            checkFormat(j.size == 9 || (a[0] == 2uL && j.size == 10))
             val stage = JournalStage.entries.firstOrNull { it.name == j[6].text(32) }
                 ?: throw FormatException(Failure.UnsupportedVersion)
             StateJournal(j[0].ident(),j[1].text(32),j[2].arr().also { checkFormat(it.size in 1..2) }.map { it.ident() },
                 fingerprint(j[3]) ?: throw FormatException(Failure.CorruptData),fingerprint(j[4]),fingerprint(j[5]),stage,fingerprint(j[7]),
-                JournalOutcome.entries.firstOrNull { it.name == j[8].text(32) } ?: throw FormatException(Failure.UnsupportedVersion))
+                JournalOutcome.entries.firstOrNull { it.name == j[8].text(32) } ?: throw FormatException(Failure.UnsupportedVersion),
+                if(j.size == 10) j[9].arr(3).let { OwnedArtifactIdentity(it[0].text(4096),StoreIdentity(it[1].text(4096),it[2].text(4096))) } else null)
         }
         val state = LocalState(binding,journal); checkFormat(encode(state).contentEquals(bytes)); return state
     }
@@ -86,14 +103,23 @@ class LocalFault(val point: LocalPoint, val moment: FaultMoment, val prefix: Int
  * A lost/retained unsynced rename yields an old/new WHOLE record, never binding+journal mixtures.
  * No real Android AtomicFile/rename/parent-fsync capability is asserted by this implementation.
  */
-class FaultLocalStateStore(initial: LocalState) {
+/** A single atomic binding+journal port. Durability is an explicit adapter contract. */
+interface LocalStateStore {
+    val durableLocalState: Boolean
+    val reconciliationRequired: Boolean
+    fun read(): LocalState
+    fun replace(state: LocalState): LocalWriteCode
+    fun reconcile(): LocalState
+}
+class FaultLocalStateStore(initial: LocalState) : LocalStateStore {
+    override val durableLocalState = true // synthetic model ONLY
     private var current = LocalStateCodec.encode(initial)
     private var durable = current.clone()
     var fault: LocalFault? = null
-    var reconciliationRequired = false; private set
-    fun bytes() = current.clone()
-    fun read() = LocalStateCodec.decode(current)
-    fun replace(state: LocalState): LocalWriteCode {
+    override var reconciliationRequired = false; private set
+    @Synchronized fun bytes() = current.clone()
+    @Synchronized override fun read() = LocalStateCodec.decode(current)
+    @Synchronized override fun replace(state: LocalState): LocalWriteCode {
         if(reconciliationRequired) return LocalWriteCode.StateUnknown
         val encoded = LocalStateCodec.encode(state); var renameStarted = false
         fun point(p: LocalPoint, moment: FaultMoment) {
@@ -128,13 +154,13 @@ class FaultLocalStateStore(initial: LocalState) {
             return if(renameStarted) LocalWriteCode.StateUnknown else LocalWriteCode.IoFailure
         }
     }
-    fun reconcile(): LocalState {
+    @Synchronized override fun reconcile(): LocalState {
         val observed = read()
         if(fault?.point == LocalPoint.ParentForce) throw StoreException(IoCode.Eio)
         durable = current.clone(); reconciliationRequired = false
         return observed
     }
-    fun crash(retainUnsyncedRename: Boolean = false) {
+    @Synchronized fun crash(retainUnsyncedRename: Boolean = false) {
         if(retainUnsyncedRename) durable = current.clone() else current = durable.clone()
         fault = null; reconciliationRequired = false
     }

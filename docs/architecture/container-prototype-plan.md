@@ -1,6 +1,6 @@
 # Copper Scroll: поэтапные задания на прототип контейнера1.1
 
-Статус: P1…P3 приняты; P4 расширяет нормы [карточками/1.2](container-p4-extension.md).
+Статус: P1…P4 приняты по пользовательским runtime receipts; P4 расширяет нормы [карточками/1.2](container-p4-extension.md).
 Ниже базовая последовательность этапов; P4 extension определяет актуальный scope. Основа:
 [design](container-design.md), [формат1.1](container-format-v1.md),
 [матрица проверок](container-test-plan.md), [решения R/C](container-review-resolution.md).
@@ -123,6 +123,12 @@ extreme validation/traversal/RAM/cache/scratch, не обещать million-obje
 
 **Вход:** P1…P4, model-tested owner/local-state. До P6 только synthetic/fault IO;
 production source/destinations требуют device profiles.
+
+**P5a: headless реализация подготовлена; Android gate открыт.**
+[Отчёт/матрица/команды](validation/p5a-report.md). Новые8 runtime tests и отдельные
+регрессии P1–P4 требуют пользовательского запуска на Honor15 и emulator17;
+прежний P4 PASS не переносится автоматически. Следующее описание сохраняет
+нормативные критерии, не является объявлением окончательной приёмки.
 
 **P5a:** SnapshotCopier и main-authorized selective compact через общий coordinator,
 выбор/default both, expected decoy secret до файлов, один S/backup/candidate/full

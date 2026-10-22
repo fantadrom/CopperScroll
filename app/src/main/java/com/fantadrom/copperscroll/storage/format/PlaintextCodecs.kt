@@ -141,7 +141,7 @@ object ObjectCodec {
                 val chunks = p[2].arr(); checkFormat(chunks.size in 1..4,Failure.UnsupportedLimit)
                 val refs = chunks.mapIndexed { i,c -> ReferenceCodec.logical(c).also { it.validate(4,id,i.toLong()) } }
                 checkFormat(refs.map { it.recordId }.distinct().size == refs.size && bytes >= refs.size && bytes <= refs.size.toLong()*Limits.CHUNK)
-                checkFormat(!p[3].bool(),Failure.UnsupportedVersion); CardPayload(bytes,refs)
+                CardPayload(bytes,refs,p[3].bool())
             }
             else -> {
                 val p = a[13].arr(5); p[0].version()
