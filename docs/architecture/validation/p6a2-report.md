@@ -12,6 +12,88 @@ P6a.1 **принят пользователем**, [отдельная запи�
 исследование/инструменты; новый Android runtime не наследует прежний PASS.
 **Production admission REFUSED, allowlist пуста; общий P6a открыт.**
 
+## Исправление проверки владельца фабрики после пользовательского прогона
+
+Исходный head PR14 `01faca8df648fa558c2f1a567e8fb00529234712` проверен fetch/API;
+PR открыт/Draft, без merge. В предоставленных p1-diagnostics.zip и
+p6a-runtime-log.txt Windows-прогон на Honor ABR-LX1 Android15 и Virtual_Pixel_6
+Android17 содержит по13 testcases,1 failure,0 errors/skipped: по12 PASS.
+Единственный отказ — explicitModesAndNegativeAdmission. Это НЕ PASS suite.
+Connected завершилась BUILD FAILED; финализатор сохранил evidence=FAIL,
+acceptance=NOT_CONFIRMED. Строгий gate не пропустил ошибку.
+
+Прогон пользователя: Gradle9.6.0/JetBrains25.0.3+-15898627-b508.16,
+sourceCodeDirty=false, sourceDirty/workingTreeDirty=true, wrapperModified=true.
+runId `77391b67-35ec-47df-896a-c2801096fd2a`,
+artifactBundleId `d1bcec711c01788a677456dab775f7a7b08ab325076b793bd2a11e676af2a601`.
+Это пользовательская Windows сборка прежнего head, не собственный запуск агента.
+Предыдущая пользовательская приёмка P6a.1 сохраняется отдельно.
+
+Retrace выполнен по test-mapping.txt именно из этого ZIP: map ID
+`a202c90dc005a1950dfca932cb14aeecb6b106b8af9391eb839bec1b9d004a36`,
+SHA256 `9c2f181f981a047454db53b9ae81fb22ebb0762eaf196f94e88806ddaa58d3e0`;
+он совпадает со стеком и manifest. Оба стека указывают на
+P6aSafRuntimeTest.kt:81 — ожидание UnsupportedDurability. Target mapping не
+использовался для retrace test APK.
+
+Причина: factory — getter нового SafStoreFactory при каждом обращении; seeded
+создавал artifact одной фабрикой, deleteOwned вызывался уже у другой. Её owned
+registry пуст, поэтому правильный AccessLost срабатывал до проверки отсутствующего
+safe-delete контракта. Ошибочен тест, а не этот production отказ.
+
+Теперь seeded принимает явный artifactFactory; в проверяемом сценарии один локальный
+экземпляр создаёт artifact и проверяет точный UnsupportedDurability. Отдельный
+новый unownedFactory обязан вернуть точный AccessLost. Production fingerprint
+до/после обеих попыток сравнивает headers/full bytes/identity; число созданий
+по-прежнему1. Ошибка AccessLost не принимается вместо UnsupportedDurability для
+владельца. Все13 методов и отрицательные grants/profile checks сохранены.
+
+Production deleteOwned/owned registry, запрет SAF delete без atomic compare-delete,
+пустая allowlist, три gates, R8/keep rules/optimization, версии и UI не менялись.
+Новый тестовый APK требует пользовательского повтора; Android агента **NOT_RUN**.
+
+Проверка исправления агентом: Gradle9.6.0/Oracle25.0.4.1, сборка2m47s — PASS.
+P6a result18 + diagnostics20 + source identity92 =130 host checks PASS.
+Сборки p1Release/test с действующим R8, ordinary-release isolation, APK/method/
+linkage/cold-loader/AXML/ICU/golden/source audits PASS; backend остаётся только в
+целевом APK. LintP1Release0 errors/26 warnings/1 hint.8 generic APK negatives,
+4 isolation + неверная external authority +2 owner ACL negatives повторно отклонены;
+подписанные APK не изменены отрицательными проверками. Новый код только в test
+source; production/JVM код не менялся, полный162 JVM suite здесь повторно не
+исполнялся (его прежний результат ниже не переименован в новый прогон).
+
+```sh
+bash gradlew -Pp6aReleaseRuntime=true :app:verifyP6aIsolation :app:verifyP4BuildIdentity :app:testP6aRuntimeResults :app:testP6aRuntimeDiagnostics :app:testP4SourceIdentity :app:lintP1Release --console=plain
+python3 tools/p6a/check-isolation.py
+P1_AUDIT_ARGUMENTS=app/build/reports/p6a-runtime/audit-arguments.txt python3 tools/p1/check-apk-audit.py
+```
+
+В среде агента дополнительно --offline --no-daemon --no-parallel --max-workers=2
+и source /workspace/tooling/env.sh. Свежий adb devices -l завершился134
+(Cannot mkdir /home/agent/.android: Read-only file system), список устройств не
+получен. Windows/Android исправленного теста и power-loss **NOT_RUN агента**.
+
+Подготовка до commit: sourceRevision=01faca8df648fa558c2f1a567e8fb00529234712,
+sourceFingerprint=4f577de6055d63033025c9e2d93e18e98122180d9ca354125c7b751748bf42a0,
+sourceDirty/sourceCodeDirty/workingTreeDirty=true, wrapperModified=false.
+artifactBundleId=49a9eb83cd24f065b6b34af607171d6d3e82945d7d88f39284986c39bff91f8e;
+targetSha256=722fba84694d38f2a15d24f059b489ac2bffc7fa0f7b6543c8e2d2e33c1d8e65,
+testSha256=9e63b071df20de4958f4b6a6c319593a47285bf6298197b9303957308cf41359.
+Новый test map ID=e54fb96e471b535cf1aa1b61180c651f41db500beed7b1fad496225693ff80cd;
+оба maps/configs/rules/hash identities сохранены в artifacts/<bundle> и
+p1-diagnostics.zip. Логи/retrace: ignored work/p6a2-owned-factory-fix.
+
+Пользовательский повтор на Honor15 и emulator17 — прежняя команда:
+
+```powershell
+.\gradlew.bat -Pp6aReleaseRuntime=true :app:p6aReleaseRuntimeCheck --console=plain
+```
+
+Ожидаются ровно13 завершённых PASS на КАЖДОМ устройстве,0 failures/errors/skipped,
+свежий runtime=PASS и BUILD SUCCESSFUL итоговой команды. Уменьшение count, -x,
+игнорирование AccessLost/UnsupportedDurability или ослабление gate не применяются.
+Остальная P6a.2 qualification/regression матрица и ограничения ниже сохранены.
+
 ## Реализовано и исследовано
 
 - [Primary-source qualification](../storage-provider-qualification.md): AOSP15
@@ -108,7 +190,7 @@ Observed capability/contract/model/experiment/admission разделены.
 шифрование/полный workflow ради count. При отсутствии нужного контракта ожидаемый
 production refusal может быть PASS отрицательной проверки, но admission REFUSED.
 
-## Выполненные проверки
+## Первоначальные проверки P6a.2
 
 Linux, Gradle9.6.0/checksum, Oracle25.0.4.1+1-LTS-5; AGP9.4.1/Kotlin2.2.10/SDK37/min31 прежние.
 

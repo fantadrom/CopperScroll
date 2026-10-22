@@ -47,8 +47,8 @@ class P6aSafRuntimeTest {
     }
     private fun created(): Pair<Artifact,RandomAccessStore> = factory.create(root("a"))
     private fun localName()="p6a-test-"+UUID.randomUUID()
-    private fun seeded(image: ByteArray = P4Fixtures.image()): Artifact {
-        val (a,s)=created(); s.use { it.writeFullyAt(0,image); it.force(); it.forceIdentity() }; return a
+    private fun seeded(image: ByteArray = P4Fixtures.image(), artifactFactory: SafStoreFactory = factory): Artifact {
+        val (a,s)=artifactFactory.create(root("a")); s.use { it.writeFullyAt(0,image); it.force(); it.forceIdentity() }; return a
     }
     private fun core(a: Artifact,local: LocalStateStore,secret: String=P3Fixtures.MAIN): TransactionCore {
         val owner=ResourceOwner(factory.openRequired(Uri.parse(a.uri)))
@@ -77,9 +77,14 @@ class P6aSafRuntimeTest {
             Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)==PackageManager.PERMISSION_DENIED)
         factory.inspect(root("a"),true) // Owner, no explicit grant: real separate provider process.
         externalGrantAccess()
-        val a=seeded()
-        check((reject { factory.deleteOwned(a) } as StoreException).code==IoCode.UnsupportedDurability)
-        factory.openRequired(Uri.parse(a.uri)).use { check(it.size>131072) }
+        // Ownership belongs to this factory instance, independently of URI access/admission.
+        val artifactFactory=SafStoreFactory(context)
+        val a=seeded(artifactFactory=artifactFactory)
+        val retained=artifactFactory.openRequired(Uri.parse(a.uri)).use { fingerprint(it,a.uri) }
+        check((reject { artifactFactory.deleteOwned(a) } as StoreException).code==IoCode.UnsupportedDurability)
+        val unownedFactory=SafStoreFactory(context)
+        check((reject { unownedFactory.deleteOwned(a) } as StoreException).code==IoCode.AccessLost)
+        artifactFactory.openRequired(Uri.parse(a.uri)).use { check(sameFingerprint(retained,fingerprint(it,a.uri))) }
         check(control("count").getInt("creates")==1)
         val before=control("count").getInt("creates")
         ResourceOwner(factory.openRequired(Uri.parse(a.uri))).use { owner ->
