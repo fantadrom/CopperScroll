@@ -64,7 +64,8 @@ prepareWorker и recoverWorker на каждом устройстве. В пер
 Android/OEM provider не убивается. Перед вторым сценарием можно выбрать ту же
 выделенную папку; scratch имена уникальны, посторонние документы не перебираются.
 
-Успех: **2 completed methods/device**, experimentOutcome=PASS,
+Успех сбора наблюдений и восстановления данных: **2 completed methods/device**,
+experimentOutcome=PASS, dataOutcome=PASS, identityConclusion=UNCONFIRMED,
 productionAdmission=REFUSED и BUILD SUCCESSFUL. Три guarantee-поля UNKNOWN — ожидаемо.
 Это process/cache-preserving проверка, не power loss или production qualification.
 
@@ -73,8 +74,9 @@ productionAdmission=REFUSED и BUILD SUCCESSFUL. Три guarantee-поля UNKNO
 общий `qualification-diagnostics.zip` в `<hostRunId>`. Пути печатаются в Terminal.
 Даже при FAIL сохраняется `prepareWorker-helper-response.properties` (либо
 `recoverWorker-helper-response.properties`) с failureCode, failureOrigin0 и
-failureFrames0. Для четырёх финальных проверок коды: VERIFY_MODE, VERIFY_SIZE,
-VERIFY_HASH, VERIFY_IDENTITY. Здесь же безопасные значения размера/режима и результаты
+failureFrames0. Для обязательных проверок данных коды VERIFY_MODE,
+VERIFY_SIZE, VERIFY_HASH; VERIFY_IDENTITY обозначает ошибку получения/разбора sample,
+а не просто несовпадение двух identity. Здесь же безопасные значения размера/режима и результаты
 сравнений; URI, содержимое и тексты исключений не выводятся. Если helper не вернул
 читаемый ответ, отдельный `*-helper-response-unavailable.txt` объясняет отсутствие.
 
@@ -83,8 +85,25 @@ checkpointPhase=PREPARED означает достигнутый checkpoint. У�
 При отказе после checkpoint ожидаются phase=PREPARATION_FAILED, completedMethods=0,
 experimentOutcome=FAIL; это не выполненный prepare и helper ещё не убивается.
 При успешном recover ledger содержит свежие checkpointPhase=RECOVERED, PID/session.
-Старый reboot checkpoint без нового verified-маркера не возобновляется: сохранить
+Старый reboot checkpoint без identityObservationVersion=2 и verified-маркера не возобновляется: сохранить
 его диагностику и выполнить новую подготовку на текущей APK-паре.
+
+В compact/ledger теперь раздельно смотреть dataOutcome и identityStability:
+MODE_DEPENDENT_OBSERVED — различаются режимы при совпавших same-mode выборках;
+SAME_MODE_UNSTABLE_OBSERVED — различаются и same-mode/after-restart выборки;
+SAMPLED_MATCHES_ONLY — совпали только собранные samples. Во всех случаях
+identityConclusion=UNCONFIRMED; ни данные, ни один inode не подтверждают identity
+или безопасность блокировок. PASS эксперимента не выдаёт production qualification.
+
+Пары `identityRToR` и `identityRwToRw` проверяются в каждом методе; пары
+`identityRAfterRestart` и `identityRwAfterRestart` сравнивают новые FD с отдельными
+сохранёнными baseline после смерти helper (при prepare — NOT_RUN). Межрежимные
+`identityCreatedRwToR`/`identityRwToR` сохранены отдельно; `identityCreatedRwToRw`
+сопоставляет исходный rw FD и новый rw FD. У каждой пары три поля: deviceMatches,
+inodeMatches, matches; последнее требует совпадения обоих значений. В отчёте нет
+raw dev/inode, URI или содержимого. Несовпадение сохраняется как наблюдение и даёт
+дойти до восстановления; отсутствие sample/ошибка IO/хэша/неполный runner — FAIL.
+После всех r/rw opens данные повторно читаются production backend без записи.
 
 ## 3. Возобновляемый штатный reboot
 
@@ -120,7 +139,7 @@ reboot — FAIL. Чужой/старый/consumed runId, потерянный ch
 перед новой подготовкой. Повторный успешный resume того же checkpoint запрещён.
 
 Успех пары: **2 completed methods/device в сумме prepare+resume**, experimentOutcome=PASS,
-productionAdmission=REFUSED. В resume исполняется ровно1 новый метод/device. Штатный
+dataOutcome=PASS, identityConclusion=UNCONFIRMED, productionAdmission=REFUSED. В resume исполняется ровно1 новый метод/device. Штатный
 shutdown может flush caches и не подтверждает внезапное исчезновение питания.
 
 ## 4. Прерывание VM/storage и физического питания

@@ -18,9 +18,14 @@ public final class QualificationLedgerTest {
         p.setProperty("authority","com.android.externalstorage.documents"); p.setProperty("providerPackage","com.android.externalstorage");
         p.setProperty("providerVersion","1"); p.setProperty("androidApi","35"); p.setProperty("pid",after?"202":"101");
         p.setProperty("bootCount","10"); p.setProperty("session",after?"33333333-3333-4333-8333-333333333333":ID);
-        p.setProperty("grants","PERSISTED_RW_OBSERVED"); p.setProperty("identity","FSTAT_EQUAL_OBSERVED_NOT_QUALIFIED");
-        p.setProperty("lock","INTERPROCESS_PROBE_OBSERVED"); p.setProperty("recovery","LOCAL_RECORD_HASH_AND_SCRATCH_BYTES");
+        p.setProperty("grants","PERSISTED_RW_OBSERVED"); p.setProperty("identity","MODE_SCOPED_FSTAT_OBSERVATIONS_ONLY");
+        p.setProperty("lock","PROBE_OBSERVED_NOT_IDENTITY_QUALIFIED"); p.setProperty("recovery","LOCAL_RECORD_HASH_AND_SCRATCH_BYTES");
         p.setProperty("cleanup","RETAINED_NO_QUALIFIED_DELETE_CONTRACT"); p.setProperty("method",after?"recoverWorker":"prepareWorker");
+        p.setProperty("identityObservationVersion","2"); p.setProperty("identityConclusion","UNCONFIRMED");
+        for(String pair:QualificationLedger.IDENTITY_PAIRS) for(String part:List.of("deviceMatches","inodeMatches","matches"))
+            p.setProperty(pair+"."+part,!after && pair.contains("AfterRestart")?"NOT_RUN":"true");
+        p.setProperty("contentHashMatches","true"); p.setProperty("expectedSize","262144"); p.setProperty("observedSize","262144");
+        p.setProperty("observedWritable","false"); p.setProperty("observedGrantCount","0"); p.setProperty("observedExistingWriteDurable","false");
         return p;
     }
     static String terminal(Properties p) throws Exception {
@@ -64,10 +69,47 @@ public final class QualificationLedgerTest {
         ledger.setProperty("phase","RECOVERED"); ledger.setProperty("completedMethods","2"); ledger.setProperty("restartEvidence","CHECKED");
         reject(()->QualificationLedger.validate(ledger));
         ledger.setProperty("preparationCompleted","true"); ledger.setProperty("preparationVerified","true"); ledger.setProperty("checkpointPhase","RECOVERED");
+        QualificationLedger.observeResponse(ledger,observed(true),"recoverWorker",ID);
+        ledger.setProperty("dataOutcome","PASS"); ledger.setProperty("identityStability",QualificationLedger.identityStability(observed(false),observed(true)));
         QualificationLedger.validate(ledger); checks++;
         for(String k:List.of("productionApproved","productionAdmission","existingWriteDurable","durableCreateIdentity","durableLocalState","backend","volume","physicalInterruption","controlledStorageInterruption","policyVersion","schemaVersion")) {
             Properties wrong=(Properties)ledger.clone(); wrong.setProperty(k,"qualified"); reject(()->QualificationLedger.validate(wrong));
         }
+        // Identity findings and successful data recovery are independent, including across death.
+        for(String pair:QualificationLedger.IDENTITY_PAIRS) {
+            Properties changed=observed(true);
+            changed.setProperty(pair+".deviceMatches","false"); changed.setProperty(pair+".matches","false"); // inode still matches
+            QualificationLedger.recovered(observed(false),changed,false); checks++;
+            String finding=QualificationLedger.identityStability(observed(false),changed);
+            check(finding.equals(QualificationLedger.CROSS_IDENTITY_PAIRS.contains(pair)?"MODE_DEPENDENT_OBSERVED":"SAME_MODE_UNSTABLE_OBSERVED"));
+            Properties recoveredLedger=(Properties)ledger.clone(); QualificationLedger.observeResponse(recoveredLedger,changed,"recoverWorker",ID);
+            recoveredLedger.setProperty("identityStability",finding); QualificationLedger.validate(recoveredLedger); checks++;
+            check(recoveredLedger.getProperty("dataOutcome").equals("PASS") && recoveredLedger.getProperty("identityConclusion").equals("UNCONFIRMED") && recoveredLedger.getProperty("productionAdmission").equals("REFUSED"));
+            changed.setProperty(pair+".matches","true"); reject(()->QualificationLedger.observation(changed,true)); // inode/content cannot override dev mismatch
+            for(String part:List.of("deviceMatches","inodeMatches","matches")) {
+                Properties missing=observed(true); missing.remove(pair+"."+part); reject(()->QualificationLedger.observation(missing,true));
+                Properties unknown=observed(true); unknown.setProperty(pair+"."+part,"NOT_RUN"); reject(()->QualificationLedger.observation(unknown,true));
+            }
+        }
+        // A preparation mismatch cannot disappear from the combined result after a matching recovery.
+        Properties unstableBefore=observed(false); unstableBefore.setProperty("identityRToR.inodeMatches","false"); unstableBefore.setProperty("identityRToR.matches","false");
+        check(QualificationLedger.identityStability(unstableBefore,observed(true)).equals("SAME_MODE_UNSTABLE_OBSERVED"));
+        Properties modeBefore=observed(false); modeBefore.setProperty("identityCreatedRwToR.deviceMatches","false"); modeBefore.setProperty("identityCreatedRwToR.matches","false");
+        check(QualificationLedger.identityStability(modeBefore,observed(true)).equals("MODE_DEPENDENT_OBSERVED"));
+        Properties wrongData=(Properties)ledger.clone(); wrongData.setProperty("contentHashMatches","false"); reject(()->QualificationLedger.validate(wrongData));
+        Properties unfinished=(Properties)ledger.clone(); unfinished.setProperty("experimentOutcome","FAIL"); reject(()->QualificationLedger.validate(unfinished));
+        Path budget=Files.createTempDirectory("p6a2-ledger-budget-");
+        try { QualificationController.summary(budget,ledger); QualificationLedger.validate(QualificationLedger.read(budget.resolve("ledger.properties"))); checks++; }
+        finally { try(var paths=Files.walk(budget)) { for(Path p:paths.sorted(Comparator.reverseOrder()).collect(java.util.stream.Collectors.toList())) Files.delete(p); } }
+        for(String key:List.of("contentHashMatches","expectedSize","observedSize","observedWritable","observedGrantCount","observedExistingWriteDurable","identityConclusion","identityObservationVersion")) {
+            Properties wrong=observed(true); wrong.setProperty(key,"wrong"); reject(()->QualificationLedger.observation(wrong,true));
+        }
+        for(String key:List.of("dataOutcome","identityConclusion","identityStability")) {
+            Properties wrong=(Properties)ledger.clone(); wrong.setProperty(key,"QUALIFIED"); reject(()->QualificationLedger.validate(wrong));
+        }
+        Properties unstable=observed(true); unstable.setProperty("identityRwAfterRestart.deviceMatches","false"); unstable.setProperty("identityRwAfterRestart.matches","false");
+        Properties hidden=(Properties)ledger.clone(); QualificationLedger.observeResponse(hidden,unstable,"recoverWorker",ID);
+        hidden.setProperty("identityStability","SAMPLED_MATCHES_ONLY"); reject(()->QualificationLedger.validate(hidden));
         Properties privateData=(Properties)ledger.clone(); privateData.setProperty("selectedUri","content://synthetic"); reject(()->QualificationLedger.validate(privateData));
         // Failed helper response survives a negative terminal gate. Checkpoint != completion.
         Path temp=Files.createTempDirectory("p6a2-helper-diagnostics-");

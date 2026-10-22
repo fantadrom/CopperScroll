@@ -74,7 +74,7 @@ public final class QualificationController {
         for(String k:RuntimeSourceIdentity.FIELDS) p.setProperty(k,QualificationLedger.value(source,k));
         for(String line:List.of("schemaVersion=1","policyVersion=P6A2-RESEARCH-1","productionAdmission=REFUSED","productionApproved=false",
             "existingWriteDurable=UNKNOWN","durableCreateIdentity=UNKNOWN","durableLocalState=UNKNOWN","volume=UNKNOWN","backend=UNKNOWN",
-            "physicalInterruption=NOT_RUN","controlledStorageInterruption=NOT_RUN","experimentOutcome=NOT_RUN","phase=NOT_STARTED","completedMethods=0","checkpointPhase=NOT_OBSERVED","preparationVerified=false","preparationCompleted=false")) {
+            "physicalInterruption=NOT_RUN","controlledStorageInterruption=NOT_RUN","experimentOutcome=NOT_RUN","phase=NOT_STARTED","completedMethods=0","checkpointPhase=NOT_OBSERVED","preparationVerified=false","preparationCompleted=false","dataOutcome=NOT_RUN","identityConclusion=UNCONFIRMED","identityStability=NOT_OBSERVED")) {
             int eq=line.indexOf('='); p.setProperty(line.substring(0,eq),line.substring(eq+1));
         }
         p.setProperty("expected","SCRATCH_AND_WHOLE_LOCAL_RECORD_SURVIVE_INTERVENTION");
@@ -96,8 +96,11 @@ public final class QualificationController {
             "existingWriteDurable","durableCreateIdentity","durableLocalState","physicalInterruption","controlledStorageInterruption","artifactBundleId","sourceRevision","sourceFingerprint","cleanup","failureType",
             "checkpointPhase","preparationVerified","preparationCompleted","helperMethod","helperStatus","failureCode","failureType0","failureOrigin0",
             "lastVerifiedCheck","observedWritable","observedGrantCount","observedExistingWriteDurable","expectedSize","observedSize",
-            "contentHashMatches","identityMatches","identityDeviceMatches","identityInodeMatches"))
+            "contentHashMatches","dataOutcome","identityConclusion","identityStability"))
             if(p.containsKey(k)) s.append(k).append('=').append(p.getProperty(k)).append('\n');
+        for(String pair:QualificationLedger.IDENTITY_PAIRS) for(String part:List.of("deviceMatches","inodeMatches","matches")) {
+            String k=pair+"."+part; if(p.containsKey(k)) s.append(k).append('=').append(p.getProperty(k)).append('\n');
+        }
         Files.writeString(dir.resolve("qualification-result.txt"),s);
     }
     static void failed(Properties ledger,Exception e) {
@@ -105,6 +108,8 @@ public final class QualificationController {
         else if("RECOVERING".equals(ledger.getProperty("phase"))) ledger.setProperty("phase","RECOVERY_FAILED");
         ledger.setProperty("observed","FAILED_OR_INCOMPLETE"); ledger.setProperty("experimentOutcome","FAIL");
         ledger.setProperty("failureType",e.getClass().getSimpleName());
+        ledger.setProperty("dataOutcome","true".equals(ledger.getProperty("preparationCompleted"))?"PREPARED_ONLY":"NOT_CONFIRMED");
+        ledger.setProperty("identityStability","INCOMPLETE");
     }
     static void archive(Path output) throws Exception {
         Path zip=output.resolve("qualification-diagnostics.zip"); long total=0;
@@ -166,14 +171,16 @@ public final class QualificationController {
                     }
                     QualificationLedger.observation(before,false);
                     QualificationLedger.observeResponse(ledger,before,reboot?"prepareReboot":"prepareWorker",deviceId);
-                    ledger.setProperty("preparationCompleted","true");
+                    ledger.setProperty("preparationCompleted","true"); ledger.setProperty("dataOutcome","PREPARED_ONLY");
+                    ledger.setProperty("identityStability",QualificationLedger.identityStability(before));
                     ledger.setProperty("observed","PREPARED_CHECKPOINT_ONLY"); ledger.setProperty("phase","PREPARED"); ledger.setProperty("completedMethods","1"); summary(dir,ledger);
                     if(!mode.equals("rebootPrepare")) {
                         ledger.setProperty("phase","RECOVERING"); summary(dir,ledger);
                         Properties after=invoke(adb,serial,reboot?"recoverReboot":"recoverWorker",deviceId,dir,ledger);
                         QualificationLedger.recovered(before,after,reboot);
                         QualificationLedger.observeResponse(ledger,after,reboot?"recoverReboot":"recoverWorker",deviceId);
-                        ledger.setProperty("observed","SCRATCH_AND_WHOLE_LOCAL_RECORD_SURVIVED"); ledger.setProperty("phase","RECOVERED"); ledger.setProperty("completedMethods","2"); ledger.setProperty("restartEvidence","CHECKED"); ledger.setProperty("experimentOutcome","PASS");
+                        ledger.setProperty("dataOutcome","PASS"); ledger.setProperty("identityStability",QualificationLedger.identityStability(before,after));
+                        ledger.setProperty("observed","SCRATCH_CONTENT_AND_WHOLE_LOCAL_RECORD_SURVIVED_IDENTITY_UNCONFIRMED"); ledger.setProperty("phase","RECOVERED"); ledger.setProperty("completedMethods","2"); ledger.setProperty("restartEvidence","CHECKED"); ledger.setProperty("experimentOutcome","PASS");
                     }
                 } catch(Exception e) {
                     failed(ledger,e); failures.add(hash(serial)+": "+e.getMessage());
@@ -187,14 +194,14 @@ public final class QualificationController {
                 Files.writeString(output.resolve("controller-failure.txt"),e.toString());
                 Files.writeString(output.resolve("qualification-result.txt"),"schemaVersion=1\nhostRunId="+id+
                     "\nphase=CONTROLLER_FAILED\nexperimentOutcome="+(failures.isEmpty()?"NOT_RUN":"FAIL")+
-                    "\nproductionAdmission=REFUSED\nmissingMandatoryExperiment=true\nfailureType="+e.getClass().getSimpleName()+"\n");
+                    "\nproductionAdmission=REFUSED\nidentityConclusion=UNCONFIRMED\nmissingMandatoryExperiment=true\nfailureType="+e.getClass().getSimpleName()+"\n");
             } catch(Exception diagnostic) { e.addSuppressed(diagnostic); }
             throw e;
         } finally {
             try { archive(output); } catch(Exception diagnostic) { if(primary!=null) primary.addSuppressed(diagnostic); else throw diagnostic; }
         }
         if(mode.equals("rebootPrepare")) System.out.println("PREPARED; experimentOutcome=NOT_RUN. Restart selected devices normally, unlock, then resume with -Pp6a2RunId="+id);
-        else System.out.println("experimentOutcome=PASS; exactly 2 completed methods per device; productionAdmission=REFUSED");
+        else System.out.println("experimentOutcome=PASS; dataOutcome=PASS; exactly 2 completed methods per device; identityConclusion=UNCONFIRMED; inspect identityStability per device; productionAdmission=REFUSED");
         System.out.println("P6a.2 receipts: "+output);
     }
 }

@@ -94,7 +94,7 @@ Reboot preparation returns without rebooting; manual normal shutdown semantics a
 explicit. No provider owned by Android/OEM is killed by this tool.
 
 Recovery checks persistable read/write grants, unchanged environment, full bytes,
-observed fstat equality, closed store, whole local binding+journal, production refusal
+mode-scoped fstat observations, closed store, whole local binding+journal, production refusal
 and fresh process/boot evidence. Successful recovery consumes the checkpoint. Unknown
 create/delete outcomes are never resolved by searching names. All scratch documents
 are retained; automatic SAF deletion is disabled without compare-delete contract.
@@ -102,6 +102,56 @@ Host run history is also limited to32 directories; preserve/move earlier evidenc
 At most32 private qualification sessions are created; session exhaustion is explicit
 failure, not deletion of evidence. Keep artifacts until review; user may later remove
 ONLY their chosen dedicated scratch folder. Never select a personal container.
+
+## Mode-scoped identity observations (version2)
+
+Each stage reads/verifies through the real production read-only adapter, closes it,
+then independently opens/closes r,r,rw,rw descriptors of the owned synthetic scratch.
+Every sample must be regular,262144 bytes and have the requested O_RDONLY/O_RDWR
+access flags. No descriptor duplicates are opened/closed under an adapter lease.
+These raw rw samples never write/truncate and cannot qualify the production factory.
+Data is read/verified AGAIN after all mode samples, so a destructive provider open
+cannot silently pass the data check.
+
+Private checkpoints retain the original creation rw sample and distinct preparation
+r/rw baselines; recovery never replaces them. Receipts expose only three booleans per
+pair: `.deviceMatches`, `.inodeMatches`, `.matches` (the conjunction of BOTH fields):
+
+| Pair field | Comparison |
+| --- | --- |
+| identityCreatedRwToR | Original creation rw FD → current first r FD (legacy comparison) |
+| identityCreatedRwToRw | Original creation rw FD → current first rw FD |
+| identityRwToR | Current first rw FD → current first r FD |
+| identityRToR | Current r → independent r reopen |
+| identityRwToRw | Current rw → independent rw reopen |
+| identityRAfterRestart | Saved preparation r → first r after worker death/reboot |
+| identityRwAfterRestart | Saved preparation rw → first rw after worker death/reboot |
+
+The last two pairs are explicitly NOT_RUN during preparation; all21 fields must
+contain coherent booleans during recovery. identityObservationVersion=2 rejects
+legacy receipts/checkpoints. Raw dev/inode remain private; no inode-only comparison,
+content-based identity or read/write alias/lock inference is introduced.
+
+A mismatch is a measured finding and does not stop collection/recovery of synthetic
+data. An inaccessible/missing/malformed sample remains a failed experiment. Full
+method/runner/count/source/artifact/scope/byte/local-state checks remain mandatory.
+Data outcome is PREPARED_ONLY after prepare; PASS requires successful recovery and
+exactly two completed methods/device. No failed/lost-ACK method can confirm data.
+identityConclusion is ALWAYS UNCONFIRMED, even with matching samples. identityStability
+combines BOTH receipts (a preparation mismatch cannot disappear on recovery):
+
+- SAME_MODE_UNSTABLE_OBSERVED: any same-mode/creation-rw/restart pair differs;
+- MODE_DEPENDENT_OBSERVED: same-mode samples match, but a cross-mode pair differs;
+- SAMPLED_MATCHES_ONLY: all collected pairs match; this still grants no identity contract.
+
+NOT_OBSERVED/INCOMPLETE describe missing measurements. Thus experimentOutcome=PASS
+means completed data recovery and observations, and may coexist with identity
+instability. The compact report prints dataOutcome, identityConclusion,
+identityStability and all per-pair fields. The lock label is
+PROBE_OBSERVED_NOT_IDENTITY_QUALIFIED: earlier interprocess probe observations do
+not prove safe r/rw aliases or lifetime locking. Production still compares full
+qualified dev+inode, requires its pre-open identity/locking contract and refuses
+unqualified writes; productionAdmission=REFUSED and all three gates remain UNKNOWN.
 
 ## Diagnostics and failure semantics
 
@@ -123,9 +173,11 @@ Recovery receipts refresh checkpoint/PID/session in the ledger instead of leavin
 preparation's values behind. helperMethod identifies the response; transient diagnostic
 values are replaced per response, so a previous method's checks cannot look current.
 
-Failure codes VERIFY_MODE, VERIFY_SIZE, VERIFY_HASH and VERIFY_IDENTITY distinguish
-the unchanged invariants. Safe observations include writable/grant-count/durability,
-expected/observed size, contentHashMatches and identity device/inode comparisons.
+Failure codes VERIFY_MODE, VERIFY_SIZE and VERIFY_HASH retain the mandatory data/
+read-only adapter checks. VERIFY_IDENTITY now denotes a failed descriptor/sample
+operation or malformed private baseline, not an observed identity inequality. Safe
+observations include writable/grant-count/durability, expected/observed size,
+contentHashMatches and mode-specific device/inode comparisons.
 Operation stages also distinguish open/read/close/checkpoint/local-state failures.
 Bounded failureTypeN/failureOriginN/failureFramesN/failureRelationN preserve the
 primary, cause and suppressed exception frames (up to4 nodes/6 frames each, with

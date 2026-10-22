@@ -112,7 +112,7 @@ internal object QualificationSession {
         // Explicit probe exception: a NEW synthetic scratch only. This does not bypass the
         // production factory's create gate for any real container or workflow.
         val p=Properties().apply {
-            setProperty("runId",id); setProperty("preparationVerified","false"); setProperty("phase","BEFORE_CREATE"); setProperty("root",root.toString())
+            setProperty("runId",id); setProperty("preparationVerified","false"); setProperty("identityObservationVersion","2"); setProperty("phase","BEFORE_CREATE"); setProperty("root",root.toString())
             setProperty("environment",environment(c,root)); setProperty("pid",Process.myPid().toString())
             setProperty("session",session); setProperty("bootCount",boot(c).toString())
         }
@@ -126,7 +126,7 @@ internal object QualificationSession {
             ParcelFileDescriptor.AutoCloseOutputStream(fd).use {
                 val stat=Os.fstat(fd.fileDescriptor); check(OsConstants.S_ISREG(stat.st_mode) && stat.st_size==0L)
                 check(Os.fcntlInt(fd.fileDescriptor,OsConstants.F_GETFL,0) and OsConstants.O_ACCMODE==OsConstants.O_RDWR)
-                p.setProperty("identity","${stat.st_dev}:${stat.st_ino}")
+                p.setProperty("identityCreatedRw",QualificationIdentity(stat.st_dev,stat.st_ino).privateCheckpointValue())
                 AndroidIo.transfer(bytes,0) { s,n,pos -> SystemCalls.write(fd.fileDescriptor,bytes,s,n,pos) }
                 p.setProperty("phase","BYTES_WRITTEN"); save(checkpoint,p)
                 SystemCalls.sync(fd.fileDescriptor)
@@ -142,6 +142,8 @@ internal object QualificationSession {
             }
             p.setProperty("sha256",hex(hash(bytes))); p.setProperty("phase","PREPARED"); save(checkpoint,p)
             verifyBytes(c,uri,p,d)
+            observeIdentities(c,uri,p,d,false)
+            verifyBytes(c,uri,p,d) // Opening scratch in rw must not silently change the data.
             d.stage=QualificationDiagnostics.Stage.SAVE_VERIFIED
             p.setProperty("preparationVerified","true"); save(checkpoint,p)
             d.stage=QualificationDiagnostics.Stage.RECEIPT
@@ -162,13 +164,35 @@ internal object QualificationSession {
             try { d.hash(hex(hash(bytes))==p.getProperty("sha256")) } finally { bytes.fill(0) }
             d.stage=QualificationDiagnostics.Stage.CLOSE_ADAPTER
         }
-        // Observed fstat only, after closing the adapter: no duplicate close under its lease.
-        d.stage=QualificationDiagnostics.Stage.OPEN_IDENTITY
-        c.contentResolver.openFileDescriptor(uri,"r")!!.use { fd ->
-            d.stage=QualificationDiagnostics.Stage.VERIFY_IDENTITY
-            val stat=Os.fstat(fd.fileDescriptor)
-            d.identity(p.getProperty("identity"),"${stat.st_dev}:${stat.st_ino}")
-            d.stage=QualificationDiagnostics.Stage.CLOSE_IDENTITY
+    }
+    private fun observeIdentities(c: Context,uri: Uri,p: Properties,d: QualificationDiagnostics,recovering: Boolean) {
+        check(p.getProperty("identityObservationVersion")=="2") { "IDENTITY_OBSERVATION_VERSION" }
+        // Sequential samples, only AFTER closing the adapter: no duplicate close under its lease.
+        // rw is an observation of this experiment's owned synthetic scratch; no writes or truncation.
+        fun sample(mode: String,ordinal: Int): QualificationIdentity {
+            d.beginIdentitySample(mode,ordinal)
+            return c.contentResolver.openFileDescriptor(uri,mode)!!.use { fd ->
+                d.stage=QualificationDiagnostics.Stage.VERIFY_IDENTITY
+                val stat=Os.fstat(fd.fileDescriptor)
+                val access=Os.fcntlInt(fd.fileDescriptor,OsConstants.F_GETFL,0) and OsConstants.O_ACCMODE
+                d.identityDescriptor(if(mode=="r") OsConstants.O_RDONLY else OsConstants.O_RDWR,access,OsConstants.S_ISREG(stat.st_mode),stat.st_size)
+                QualificationIdentity(stat.st_dev,stat.st_ino).also { d.stage=QualificationDiagnostics.Stage.CLOSE_IDENTITY }
+            }
+        }
+        val r1=sample("r",1); val r2=sample("r",2)
+        val rw1=sample("rw",1); val rw2=sample("rw",2)
+        val created=QualificationIdentity.fromCheckpoint(p.getProperty("identityCreatedRw"))
+        d.identity(QualificationIdentity.Comparison.CREATED_RW_TO_R,created,r1)
+        d.identity(QualificationIdentity.Comparison.CREATED_RW_TO_RW,created,rw1)
+        d.identity(QualificationIdentity.Comparison.RW_TO_R,rw1,r1)
+        d.identity(QualificationIdentity.Comparison.R_TO_R,r1,r2)
+        d.identity(QualificationIdentity.Comparison.RW_TO_RW,rw1,rw2)
+        if(recovering) {
+            d.identity(QualificationIdentity.Comparison.R_AFTER_RESTART,QualificationIdentity.fromCheckpoint(p.getProperty("identityR")),r1)
+            d.identity(QualificationIdentity.Comparison.RW_AFTER_RESTART,QualificationIdentity.fromCheckpoint(p.getProperty("identityRw")),rw1)
+        } else {
+            p.setProperty("identityR",r1.privateCheckpointValue()); p.setProperty("identityRw",rw1.privateCheckpointValue())
+            d.restartIdentityNotRun()
         }
     }
     private fun recover(c: Context,id: String,reboot: Boolean,d: QualificationDiagnostics): Bundle {
@@ -178,7 +202,10 @@ internal object QualificationSession {
         else check(boot(c)==p.getProperty("bootCount").toInt() && Process.myPid()!=p.getProperty("pid").toInt())
         check(session!=p.getProperty("session")) { "FRESH_WORKER_NOT_OBSERVED" }
         val root=Uri.parse(p.getProperty("root")); check(environment(c,root)==p.getProperty("environment")) { "ENVIRONMENT_CHANGED" }; grant(c,root)
-        verifyBytes(c,Uri.parse(p.getProperty("uri")),p,d)
+        val uri=Uri.parse(p.getProperty("uri"))
+        verifyBytes(c,uri,p,d)
+        observeIdentities(c,uri,p,d,true)
+        verifyBytes(c,uri,p,d)
         d.stage=QualificationDiagnostics.Stage.VERIFY_LOCAL_STATE
         AppPrivateLocalState.open(c,"p6a2-local-$id").use { local ->
             check(local.presence==LocalPresence.Ready)
@@ -200,11 +227,12 @@ internal object QualificationSession {
         putString("providerVersion",pkg.longVersionCode.toString()); putString("providerBuildHash",AndroidSafStore.hash("${pkg.versionName}:${pkg.lastUpdateTime}"))
         putString("androidBuildHash",AndroidSafStore.hash(Build.FINGERPRINT)); putString("androidApi",Build.VERSION.SDK_INT.toString())
         putString("checkpoints","BEFORE_CREATE,URI_RETURNED,BYTES_WRITTEN,FILE_FORCED,PREPARED"+if(phase=="RECOVERED") ",RECOVERED" else "")
-        putString("lock","INTERPROCESS_PROBE_OBSERVED")
+        putString("lock","PROBE_OBSERVED_NOT_IDENTITY_QUALIFIED")
         putString("productionCreate","REFUSED_BEFORE_CREATE")
         putString("namespacePublication","UNSUPPORTED_PUBLIC_SAF")
         putString("recovery","LOCAL_RECORD_HASH_AND_SCRATCH_BYTES")
-        putString("grants","PERSISTED_RW_OBSERVED"); putString("identity","FSTAT_EQUAL_OBSERVED_NOT_QUALIFIED")
+        putString("grants","PERSISTED_RW_OBSERVED"); putString("identity","MODE_SCOPED_FSTAT_OBSERVATIONS_ONLY")
+        putString("identityObservationVersion","2"); putString("identityConclusion","UNCONFIRMED")
         putString("cleanup","RETAINED_NO_QUALIFIED_DELETE_CONTRACT")
     }
 }

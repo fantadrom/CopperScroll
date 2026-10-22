@@ -12,6 +12,147 @@ P6a.1 **принят пользователем**, [отдельная запи�
 исследование/инструменты; новый Android runtime не наследует прежний PASS.
 **Production admission REFUSED, allowlist пуста; общий P6a открыт.**
 
+## Разделение межрежимной и same-mode identity
+
+Текущий исходный head `df75c008c06dc0654def895f9d75026efb690520` подтверждён
+fetch/API; ветка прежняя, PR14 open/Draft, без merge. Новый пользовательский ZIP
+SHA256 `48d5bb81f14b282c6ad02b57ef02e6390e85aa34bda257d63cca4484227f8ebd`,
+hostRunId `822009a4-0acd-4845-b1e0-c94f735bcfa7`, device runId
+`f84e11d3-86f5-407e-b1a3-ff1900240b25`. В нём ровно один device ledger — эмулятор;
+нового Honor прогона этот архив не подтверждает. Исторический Honor PASS ниже
+сохранён отдельно. Windows: Gradle9.6.0/JetBrains25.0.3+-15898627-b508.16,
+sourceRevision=df75c008c06dc0654def895f9d75026efb690520, sourceCodeDirty=false,
+sourceDirty/workingTreeDirty=true, wrapperModified=true; sourceFingerprint
+`7dc8ab667cda9bfa30753caf4f6bb03ceed7cdd7f0ccab10b6c2350fd469d5ef`.
+Artifact bundle `0b562d53099782bb375ecce6763ff9cf453608a8f1c0d18ea2144b294a94e5b9`,
+target/test SHA256 соответственно
+`d6da3a3855dc45cf121aad849222575ac3b0abbb17b54e368364549602cd598d` /
+`d9a82e0f02055f5b3534be16f323cbd28af46a155984cb1c02a12ab2b1128428`.
+
+Теперь исходная причина определена: VERIFY_IDENTITY, contentHashMatches=true,
+expectedSize=observedSize=262144, identityDeviceMatches=false,
+identityInodeMatches=true. Ledger корректно сохранил PREPARATION_FAILED,
+checkpointPhase=PREPARED, preparationVerified/preparationCompleted=false,
+completedMethods=0/experimentOutcome=FAIL. Helper не убивался; восстановления ещё
+не было. Сравнивался creation FD, открытый rw, и новый FD, открытый r. Различие
+st_dev установлено; причина различия и факт подмены файла **не установлены**.
+Совпавшие inode/bytes не доказывают identity. Этот failed run не переклассифицирован.
+
+По новому утверждённому сценарию identity собирается независимо от результата данных:
+
+- В каждом методе после закрытия production read-only adapter последовательно
+  открываются/закрываются r,r,rw,rw FD только собственного synthetic scratch. Для
+  каждого обязательны regular file,262144 bytes и реальный O_RDONLY/O_RDWR режим.
+  rw opens не записывают и не truncate; после них данные снова полностью читаются
+  через production backend, с прежними строгими mode/size/hash условиями.
+- Сохранены отдельные original creation-rw и preparation r/rw samples в private
+  forced checkpoint. Сравниваются creation-rw→r, creation-rw→rw, текущие rw→r,
+  r→r и rw→rw; recovery дополнительно сравнивает сохранённый r с новым r и
+  сохранённый rw с новым rw. Baselines при recovery не заменяются. В preparation
+  обе after-restart пары NOT_RUN; в recovery нужны все21 coherent boolean fields.
+- У каждой пары отдельно deviceMatches/inodeMatches/matches; matches требует оба
+  значения. Наружу не передаются dev/inode, URI, bytes/digests или exception messages.
+  Внутренняя identityObservationVersion=2 отделяет новый протокол от старого
+  checkpoint/receipt. Случайный одинаковый inode и совпадение содержимого не дают
+  функции восстановления identity и не меняют production ключи блокировок.
+- Само несовпадение — записанное наблюдение, позволяющее продолжить сбор данных и
+  recovery. Ошибка открытия/fstat/режима/размера/чтения/хэша/private baseline, неполный
+  runner, lost ACK, чужой scope/run/artifact — FAIL. Сохраняются original helper
+  frames/cause/suppressed и файл ответа до gate; диагностические sample mode/ordinal,
+  access flags/regular/size помогают разбирать отдельный отказ FD.
+- dataOutcome=PREPARED_ONLY после одного прошедшего prepare; dataOutcome=PASS требует
+  всей пары точных completed методов, нового процесса/session, прежнего boot count
+  (либо увеличенного для reboot), grant/environment, whole local binding+journal
+  и данных. experimentOutcome=PASS означает завершённый сбор и data recovery.
+  identityConclusion **всегда UNCONFIRMED**, включая случай полного совпадения.
+
+identityStability суммирует **оба** receipts: SAME_MODE_UNSTABLE_OBSERVED при любом
+same-mode/creation-rw/restart несовпадении; MODE_DEPENDENT_OBSERVED при несовпадении
+между режимами и совпавших same-mode samples; SAMPLED_MATCHES_ONLY при совпавших
+выборках. Это описание измерений, без объяснения причины st_dev и без qualified
+identity контракта. Подготовительное несовпадение не исчезает, если recovery затем
+совпала. NOT_OBSERVED/INCOMPLETE обозначают недостаточные измерения. Lock observation
+помечена PROBE_OBSERVED_NOT_IDENTITY_QUALIFIED: доступность одних данных через URI
+не доказывает одинаковую файловую identity или безопасный lock alias для r/rw.
+
+Production dev+inode checks, pre-open identity, lease/locking, grants, delete refusal
+и admission код не менялись. Все три gates UNKNOWN, allowlist пуста,
+productionAdmission=REFUSED независимо от dataOutcome/identityStability. Изменения
+касаются opt-in observational harness, его host gate/tests и документации. Все13
+correctness методов/четыре явных controller метода и exact runner/count/freshness
+проверки сохранены; R8/keep/optimization scope/версии/обычный UI прежние. p1Release
+по-прежнему отличается от ordinary release подписью/applicationId/harness/API keep,
+backend только target; storage/ICU/CBOR/crypto вне прежней optimization scope.
+
+[Прежняя готовая команда Windows](../../../tools/p6a2/android-qualification-windows.md)
+запускает новый протокол без правок Gradle/исходников. Старый private checkpoint
+не возобновляется новой APK-парой: нужен новый process run или reboot prepare.
+Прошлые реальные receipts не используются как подтверждение текущего runtime.
+
+Проверки нового протокола агентом (Linux):11 JVM tests (7 diagnostics +4 identity),
+0 failures/errors/skipped;372 host checks (242 qualification +18 results +20 archives
++92 source identity) PASS. Fixtures покрывают одинаковый inode при другом dev и
+обратный случай, mode mismatch при stable same-mode samples, distinct persisted
+r/rw baselines и их изменение после restart, malformed/noncanonical/overflow
+private baselines, отсутствие сырых значений в выводе и ошибки sample FD flags/size/
+regular. Host проверяет независимость data PASS от identity mismatch, сохранение
+подготовительного несовпадения, все21 обязательных поля/boolean AND, пропуски после
+restart, запрет QUALIFIED/скрытого mismatch, byte/mode failures и прежние zero/partial/
+skip/crash/foreign/lost-ACK negatives. Новый полный ledger проходит bounded round-trip.
+Полный162-test production fault suite здесь повторно не запускался: production
+алгоритмы/модели не менялись; прежние результаты ниже не переименованы в новые.
+
+```sh
+bash gradlew :app:testDebugUnitTest --tests '*QualificationDiagnosticsTest' --tests '*QualificationIdentityTest' :app:testP6a2Qualification :app:testP6aRuntimeResults :app:testP6aRuntimeDiagnostics :app:testP4SourceIdentity :app:assembleDebug :app:assembleDebugAndroidTest :app:lintDebug --console=plain
+bash gradlew -Pp6aReleaseRuntime=true :app:verifyP6aIsolation :app:verifyP4BuildIdentity :app:testP6a2Qualification :app:testP6aRuntimeResults :app:testP6aRuntimeDiagnostics :app:testP4SourceIdentity :app:lintRelease :app:lintP1Release --console=plain
+python3 tools/p6a/check-isolation.py
+P1_AUDIT_ARGUMENTS=app/build/reports/p6a-runtime/audit-arguments.txt python3 tools/p1/check-apk-audit.py
+```
+
+В среде агента использованы source /workspace/tooling/env.sh и --offline --no-daemon
+--no-parallel --max-workers=2; Gradle9.6.0/Oracle25.0.4.1, AGP/Kotlin/SDK прежние.
+Debug/debugAndroidTest и lintDebug PASS (0 errors/13 warnings/1 hint). Новый Android
+runtime/реальные r→r/rw→rw и after-death значения **NOT_RUN агента**: adb devices -l
+завершился134 (Cannot mkdir /home/agent/.android: Read-only file system), список
+устройств не получен. Linux pure/host fixtures не устанавливают реальные значения
+identity Android и не заменяют новый пользовательский прогон. Нужны2 completed
+methods/device с dataOutcome=PASS и отдельными identityStability/UNCONFIRMED; при
+отказе нужен свежий qualification-diagnostics.zip. Windows новых helpers — NOT_RUN.
+
+Release/p1Release/test APK собраны с действующим R8; полный release/audit/lint
+запуск4m41s — PASS. LintRelease0 errors/15 warnings/1 hint, lintP1Release0 errors/
+26 warnings/1 hint. APK/method/linkage/cold-loader/package-access/manifest/isolation
+и actual-source audits PASS;0 duplicate definitions,3950 pinned ICU resource files,
+production backend только target. Новый QualificationIdentity обязателен в opt-in
+APK audit и отсутствует в ordinary release. Повторно отклонены8 generic APK negatives
+и7 isolation/authority/ACL negatives; исходные подписанные APK не изменены.
+Docs validator:51 links/anchors,28 tables,116 IDs,13 resolution rows; diff whitespace
+PASS. R8 keep/configuration scope не менялся.
+
+Подготовка до commit, не clean build публикуемого head:
+
+```properties
+sourceRevision=df75c008c06dc0654def895f9d75026efb690520
+sourceFingerprint=bdcec5dd0eaba89fdc0dd5f73ceec54d7ad09b999dba7a83edfa5c67791d69e2
+sourceDirty=true
+sourceCodeDirty=true
+workingTreeDirty=true
+wrapperModified=false
+artifactBundleId=7fa22d5bd3be25394b27104b322fcc129ac9033151574e7cad1be3cf70f86d1e
+targetSha256=5bf4bf62dd3864f7e603e7a6b11e1e3fd1ca31db9c54b1f816690e0577d3e5e9
+testSha256=11c44674b23d402914bc980f0214b33ec9d956e35a795e20983890550daf09c7
+targetMapId=6f7d9f1f2b5ec699b530a2d3a571e86cb84773bd8ed913b9d36f66fd5a9e3a51
+testMapId=a54845eb63b734cd118bb8d5fa6e2b7d9464e5604d26f96baf639497b8119a11
+targetMappingSha256=8a3b2e4644eb0bb0a080e5a58737717102c3e7490eca07f58e8a32d0c0505e58
+testMappingSha256=f0f6e4f622957b27e4162f7849a9d5ddb607961cf2a6a205ae3c7ccc76764bda
+runtime=NOT_RUN
+```
+
+Оба maps/configs/rules и SHA identities сохранены в artifacts/<bundle> и текущем
+p1-diagnostics.zip. Совпадение test map ID с прежним не означает тот же APK:
+принадлежность устанавливается bundle + APK/mapping hashes. Новым mapping не
+расшифровывался стек пользовательской другой пары. Логи ignored work/p6a2-mode-identity.
+
 ## Диагностика prepareWorker после пользовательского process experiment
 
 Перед изменением fetch/API подтвердили head `501ed72f4ec6c044101fc748f7a651b0cf30da50`,

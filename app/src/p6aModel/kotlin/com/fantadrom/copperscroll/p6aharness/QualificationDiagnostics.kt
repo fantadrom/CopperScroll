@@ -29,12 +29,23 @@ internal class QualificationDiagnostics {
         values["contentHashMatches"] = matches.toString()
         checked(Stage.VERIFY_HASH, matches)
     }
-    fun identity(expected: String?, actual: String) {
-        val a = expected?.split(':'); val b = actual.split(':')
-        values["identityDeviceMatches"] = (a?.getOrNull(0) == b.getOrNull(0)).toString()
-        values["identityInodeMatches"] = (a?.getOrNull(1) == b.getOrNull(1)).toString()
-        values["identityMatches"] = (expected == actual).toString()
-        checked(Stage.VERIFY_IDENTITY, expected == actual)
+    fun beginIdentitySample(mode: String, ordinal: Int) {
+        check(mode in setOf("r","rw") && ordinal in 1..2) { "INVALID_SAMPLE_REQUEST" }
+        stage=Stage.OPEN_IDENTITY
+        values["identitySampleMode"]=mode; values["identitySampleOrdinal"]=ordinal.toString()
+    }
+    fun identityDescriptor(expectedAccess: Int, actualAccess: Int, regular: Boolean, size: Long) {
+        values["identitySampleExpectedAccess"]=expectedAccess.toString(); values["identitySampleObservedAccess"]=actualAccess.toString()
+        values["identitySampleRegular"]=regular.toString(); values["identitySampleSize"]=size.toString()
+        checked(Stage.VERIFY_IDENTITY, expectedAccess==actualAccess && regular && size==262144L)
+    }
+    fun identity(kind: QualificationIdentity.Comparison, expected: QualificationIdentity, actual: QualificationIdentity) {
+        stage=Stage.VERIFY_IDENTITY
+        values.putAll(expected.compare(kind,actual)) // A mismatch is an observation, never an identity fallback.
+    }
+    fun restartIdentityNotRun() {
+        for(kind in listOf(QualificationIdentity.Comparison.R_AFTER_RESTART,QualificationIdentity.Comparison.RW_AFTER_RESTART))
+            for(part in listOf("deviceMatches","inodeMatches","matches")) values["${kind.field}.$part"]="NOT_RUN"
     }
     fun snapshot(): Map<String, String> = values.toMap()
     fun failure(error: Throwable): Map<String, String> = values.toMutableMap().apply {

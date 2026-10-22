@@ -1,6 +1,7 @@
 package com.fantadrom.copperscroll.storage.android
 
 import com.fantadrom.copperscroll.p6aharness.QualificationDiagnostics
+import com.fantadrom.copperscroll.p6aharness.QualificationIdentity
 import org.junit.Assert.*
 import org.junit.Test
 
@@ -18,15 +19,23 @@ class QualificationDiagnosticsTest {
         val size=failed(d) { d.size(0) }; assertEquals("VERIFY_SIZE",size["failureCode"]); assertEquals("0",size["observedSize"])
         assertEquals("262144",size["expectedSize"])
         val hash=failed(d) { d.hash(false) }; assertEquals("VERIFY_HASH",hash["failureCode"]); assertEquals("false",hash["contentHashMatches"])
-        val identity=failed(d) { d.identity("123:456","123:789") }
-        assertEquals("VERIFY_IDENTITY",identity["failureCode"]); assertEquals("true",identity["identityDeviceMatches"])
-        assertEquals("false",identity["identityInodeMatches"]); assertFalse(identity.toString().contains("123:456"))
-        // Preserve strict original identity equality, including representation differences.
-        assertEquals("VERIFY_IDENTITY",failed(d) { d.identity("01:2","1:2") }["failureCode"])
+        d.stage=QualificationDiagnostics.Stage.VERIFY_IDENTITY
+        assertEquals("VERIFY_IDENTITY",d.failure(java.io.IOException("hidden fstat error"))["failureCode"])
+    }
+    @Test fun sampleDescriptorFailuresKeepModeOrdinalAndStrictRequirements() {
+        for(fault in 0..2) {
+            val d=QualificationDiagnostics(); d.beginIdentitySample("rw",2)
+            val p=failed(d) { d.identityDescriptor(2,if(fault==0) 0 else 2,fault!=1,if(fault==2) 0 else 262144) }
+            assertEquals("VERIFY_IDENTITY",p["failureCode"])
+            assertEquals("rw",p["identitySampleMode"]); assertEquals("2",p["identitySampleOrdinal"])
+        }
+        val d=QualificationDiagnostics(); d.beginIdentitySample("r",1); d.identityDescriptor(0,0,true,262144)
+        assertEquals("VERIFY_IDENTITY",d.snapshot()["lastVerifiedCheck"])
     }
     @Test fun successfulChecksRecordLastCompletedInvariant() {
-        val d=QualificationDiagnostics(); d.mode(false,0,false); d.size(262144); d.hash(true); d.identity("1:2","1:2")
-        assertEquals("VERIFY_IDENTITY",d.snapshot()["lastVerifiedCheck"])
+        val d=QualificationDiagnostics(); d.mode(false,0,false); d.size(262144); d.hash(true); d.identity(QualificationIdentity.Comparison.R_TO_R,QualificationIdentity(1,2),QualificationIdentity(1,2))
+        assertEquals("VERIFY_HASH",d.snapshot()["lastVerifiedCheck"])
+        assertEquals("true",d.snapshot()["identityRToR.matches"])
         assertFalse(d.snapshot().containsKey("failureCode"))
     }
     @Test fun preservesOriginalLocationCauseAndSuppressedWithoutMessages() {

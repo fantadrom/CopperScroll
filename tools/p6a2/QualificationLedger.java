@@ -43,22 +43,47 @@ public final class QualificationLedger {
         require(receipt!=null && receipt.length()<24000,"Missing/oversized receipt");
         return parse(new String(Base64.getDecoder().decode(receipt),StandardCharsets.UTF_8));
     }
+    static final List<String> CROSS_IDENTITY_PAIRS=List.of("identityCreatedRwToR","identityRwToR");
+    static final List<String> SAME_IDENTITY_PAIRS=List.of("identityCreatedRwToRw","identityRToR","identityRwToRw","identityRAfterRestart","identityRwAfterRestart");
+    static final List<String> IDENTITY_PAIRS=List.of("identityCreatedRwToR","identityCreatedRwToRw","identityRwToR","identityRToR","identityRwToRw","identityRAfterRestart","identityRwAfterRestart");
+    static boolean identityField(String key) {
+        for(String pair:IDENTITY_PAIRS) for(String part:List.of("deviceMatches","inodeMatches","matches")) if(key.equals(pair+"."+part)) return true;
+        return false;
+    }
+    static void identityObservations(Properties p,boolean recovered) {
+        require(value(p,"identityObservationVersion").equals("2") && value(p,"identityConclusion").equals("UNCONFIRMED"),"Unqualified identity observations only");
+        for(String pair:IDENTITY_PAIRS) {
+            boolean notRun=!recovered && pair.contains("AfterRestart");
+            for(String part:List.of("deviceMatches","inodeMatches","matches"))
+                require((notRun?Set.of("NOT_RUN"):Set.of("true","false")).contains(value(p,pair+"."+part)),"Missing/invalid mode-scoped identity observation");
+            if(!notRun) require(value(p,pair+".matches").equals(Boolean.toString(Boolean.parseBoolean(value(p,pair+".deviceMatches")) && Boolean.parseBoolean(value(p,pair+".inodeMatches")))),"Identity requires BOTH device and inode");
+        }
+    }
+    static String identityStability(Properties... receipts) {
+        boolean cross=false;
+        for(Properties p:receipts) {
+            for(String pair:SAME_IDENTITY_PAIRS) if("false".equals(value(p,pair+".matches"))) return "SAME_MODE_UNSTABLE_OBSERVED";
+            for(String pair:CROSS_IDENTITY_PAIRS) if("false".equals(value(p,pair+".matches"))) cross=true;
+        }
+        return cross?"MODE_DEPENDENT_OBSERVED":"SAMPLED_MATCHES_ONLY";
+    }
     static final Set<String> OBSERVATION_FIELDS=Set.of("checkpointPhase","preparationVerified","pid","session","bootCount",
         "rootHash","environmentHash","authority","providerPackage","providerVersion","providerBuildHash","androidBuildHash","androidApi",
         "checkpoints","lock","productionCreate","namespacePublication","recovery","grants","identity","cleanup",
         "lastVerifiedCheck","observedWritable","observedGrantCount","observedExistingWriteDurable","expectedSize","observedSize",
-        "contentHashMatches","identityMatches","identityDeviceMatches","identityInodeMatches","checkpointReadFailureType");
+        "identitySampleMode","identitySampleOrdinal","identitySampleExpectedAccess","identitySampleObservedAccess","identitySampleRegular","identitySampleSize",
+        "contentHashMatches","identityObservationVersion","identityConclusion","checkpointReadFailureType");
     static final Set<String> DIAGNOSTIC_FIELDS=Set.of("lastVerifiedCheck","observedWritable","observedGrantCount",
-        "observedExistingWriteDurable","expectedSize","observedSize","contentHashMatches","identityMatches",
-        "identityDeviceMatches","identityInodeMatches","checkpointReadFailureType");
+        "observedExistingWriteDurable","expectedSize","observedSize","contentHashMatches","checkpointReadFailureType",
+        "identitySampleMode","identitySampleOrdinal","identitySampleExpectedAccess","identitySampleObservedAccess","identitySampleRegular","identitySampleSize");
     static boolean failureField(String key) { return key.matches("failure(Code|Truncated|Type[0-3]|Origin[0-3]|Frames[0-3]|Relation[0-3])"); }
     static void observeResponse(Properties ledger,Properties p,String method,String id) {
         require(method.equals(value(p,"method")) && id.equals(value(p,"runId")),"Foreign run/method");
         String status=value(p,"status");
         // Diagnostic values describe THIS response, never an earlier successful method.
-        for(String k:new ArrayList<>(ledger.stringPropertyNames())) if(DIAGNOSTIC_FIELDS.contains(k) || failureField(k)) ledger.remove(k);
+        for(String k:new ArrayList<>(ledger.stringPropertyNames())) if(DIAGNOSTIC_FIELDS.contains(k) || failureField(k) || identityField(k)) ledger.remove(k);
         ledger.setProperty("helperStatus",status); ledger.setProperty("helperMethod",method);
-        for(String k:p.stringPropertyNames()) if(OBSERVATION_FIELDS.contains(k) ||
+        for(String k:p.stringPropertyNames()) if(OBSERVATION_FIELDS.contains(k) || identityField(k) ||
             failureField(k)) ledger.setProperty(k,p.getProperty(k));
     }
     static Properties terminal(String terminal,String method,String runId) throws Exception {
@@ -95,9 +120,15 @@ public final class QualificationLedger {
         for(String k:List.of("rootHash","environmentHash","providerBuildHash","androidBuildHash")) require(value(p,k).matches("[0-9a-f]{64}"),"Invalid scope hash");
         require(Integer.parseInt(value(p,"androidApi"))>=31 && Integer.parseInt(value(p,"pid"))>0 && Integer.parseInt(value(p,"bootCount"))>=0,"Unsupported process/boot evidence");
         UUID.fromString(value(p,"session"));
-        require(value(p,"grants").equals("PERSISTED_RW_OBSERVED") && value(p,"identity").equals("FSTAT_EQUAL_OBSERVED_NOT_QUALIFIED"),"Missing grants/identity");
-        require(value(p,"lock").equals("INTERPROCESS_PROBE_OBSERVED") && value(p,"recovery").equals("LOCAL_RECORD_HASH_AND_SCRATCH_BYTES"),"Missing lock/recovery observation");
+        require(value(p,"grants").equals("PERSISTED_RW_OBSERVED") && value(p,"identity").equals("MODE_SCOPED_FSTAT_OBSERVATIONS_ONLY"),"Missing grants/identity");
+        require(value(p,"lock").equals("PROBE_OBSERVED_NOT_IDENTITY_QUALIFIED") && value(p,"recovery").equals("LOCAL_RECORD_HASH_AND_SCRATCH_BYTES"),"Missing lock/recovery observation");
+        dataObservation(p);
+        identityObservations(p,recovered);
         require(value(p,"cleanup").equals("RETAINED_NO_QUALIFIED_DELETE_CONTRACT"),"Unsafe cleanup");
+    }
+    static void dataObservation(Properties p) {
+        require(value(p,"contentHashMatches").equals("true") && value(p,"expectedSize").equals("262144") && value(p,"observedSize").equals("262144"),"Data verification incomplete");
+        require(value(p,"observedWritable").equals("false") && value(p,"observedGrantCount").equals("0") && value(p,"observedExistingWriteDurable").equals("false"),"Read-only adapter check incomplete");
     }
     static void recovered(Properties before,Properties after,boolean reboot) {
         observation(before,false); observation(after,true);
@@ -115,6 +146,9 @@ public final class QualificationLedger {
         require(value(p,"volume").equals("UNKNOWN") && value(p,"backend").equals("UNKNOWN"),"Guessed backend");
         require(value(p,"physicalInterruption").equals("NOT_RUN") && value(p,"controlledStorageInterruption").equals("NOT_RUN"),"Unsupported power claim");
         require(Set.of("PASS","FAIL","NOT_RUN").contains(value(p,"experimentOutcome")),"Invalid experiment outcome");
+        require(value(p,"identityConclusion").equals("UNCONFIRMED"),"Observation cannot qualify identity or locks");
+        require(Set.of("PASS","PREPARED_ONLY","NOT_RUN","NOT_CONFIRMED").contains(value(p,"dataOutcome")),"Invalid data outcome");
+        require(!value(p,"dataOutcome").equals("PASS") || value(p,"experimentOutcome").equals("PASS"),"Unfinished method cannot confirm data recovery");
         UUID.fromString(value(p,"runId"));
         for(String k:List.of("artifactBundleId","targetSha256","testSha256","targetMapId","testMapId","targetMappingSha256","testMappingSha256","targetConfigurationSha256","testConfigurationSha256","sourceFingerprint","deviceHash")) require(value(p,k).matches("[0-9a-f]{64}"),"Missing artifact/source/device identity");
         for(String k:RuntimeSourceIdentity.FIELDS) value(p,k);
@@ -127,6 +161,11 @@ public final class QualificationLedger {
         require(value(p,"sourceRevision").matches("[0-9a-f]{40}"),"Missing revision");
         for(String k:List.of("sourceDirty","sourceCodeDirty","workingTreeDirty","wrapperModified")) require(Set.of("true","false").contains(value(p,k)),"Missing source state");
         if(value(p,"experimentOutcome").equals("PASS")) {
+            require(value(p,"dataOutcome").equals("PASS"),"Experiment PASS requires data recovery");
+            dataObservation(p); identityObservations(p,true);
+            require(Set.of("SAME_MODE_UNSTABLE_OBSERVED","MODE_DEPENDENT_OBSERVED","SAMPLED_MATCHES_ONLY").contains(value(p,"identityStability")),"Missing identity finding");
+            String current=identityStability(p),all=value(p,"identityStability");
+            require(all.equals("SAME_MODE_UNSTABLE_OBSERVED") || (all.equals("MODE_DEPENDENT_OBSERVED") && !current.equals("SAME_MODE_UNSTABLE_OBSERVED")) || all.equals(current),"Identity finding hides a mismatch");
             require(value(p,"preparationCompleted").equals("true") && value(p,"preparationVerified").equals("true") && value(p,"checkpointPhase").equals("RECOVERED"),"Checkpoint alone cannot PASS");
             require(value(p,"phase").equals("RECOVERED") && value(p,"completedMethods").equals("2"),"Partial experiment cannot PASS");
             require(Set.of("WORKER_PROCESS","ORDERLY_REBOOT").contains(value(p,"intervention")),"Wrong intervention");
