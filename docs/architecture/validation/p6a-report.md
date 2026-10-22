@@ -8,10 +8,58 @@ merge, ancestry и чистое дерево. AGENTS.md не найден. Пр�
 format1.1/1.2, review-resolution, prototype P6, test SAF/DUR/LIFE/LEAK/MAINT,
 отчёты P1–P5b и существующий owner/core/copier/coordinator/recovery/local codec.
 
-**Статус: Android adapters и fail-closed infrastructure; Android агента NOT_RUN.
-Production allowlist пуста. P6a.1/P6a в целом ещё не приняты.** Пользовательские
+**Текущий статус: P6a.1 принят по пользовательскому подтверждению 22.10.2026.
+Production allowlist пуста; квалификация P6a.2 и общий P6a открыты.**
+Android агента NOT_RUN ниже относится к собственным историческим сборкам. Пользовательские
 P5b/regression результаты прежней пары отдельно добавлены в
 [p5b-report](p5b-report.md); они не подтверждают новые adapters/APK P6a.
+
+## Пользовательское подтверждение P6a.1 от 22 октября 2026
+
+Пользователь сообщил успешное выполнение проверок после `91ff18bcbadbdf3e1ec9a2844c1f09f73741e1d1`.
+Результаты Results(1).zip проверены в предшествующем чате; в среде этого задания
+архив недоступен. Агент не получал/не проверял его самостоятельно и не утверждает,
+что исследовал отсутствующие raw runtime XML. Ниже зафиксировано переданное
+пользовательское подтверждение и его идентификаторы, не собственный Android запуск.
+
+| Проверка | Honor ABR-LX1 Android15/API35 | Virtual_Pixel_6 Android17/API37 |
+| --- | --- | --- |
+| P6a SAF runtime |13 PASS|13 PASS|
+| P1 / P2 / P3 |7 /8 /8 PASS|7 /8 /8 PASS|
+| P4 / P5a / P5b |10 /8 /8 PASS|10 /8 /8 PASS|
+| Real-provider probe |1 завершённый тест, receipt|1 завершённый тест, receipt|
+
+Runtime receipts: runtime=PASS, failures/errors/skipped=0; **124 завершённых runtime
+теста плюс2 отдельных probe**. Gradle9.6.0, JetBrains JVM `25.0.3+-15898627-b508.16`.
+sourceRevision=`91ff18bcbadbdf3e1ec9a2844c1f09f73741e1d1`, sourceFingerprint расширенных
+receipts=`ffb380e2e34d121176dd60bb22cb9436abce9a4ca34373af5d1b75a1a064bdff`.
+sourceCodeDirty=false, sourceDirty/workingTreeDirty=true, wrapperModified=true;
+это не полностью чистая сборка master.
+
+- P6a runtime runId: `18e9b55b-05bc-47e6-9f03-aff27e8569bc`.
+- P6a/probe artifactBundleId: `59b9ecc23c9967f279553b2dd7fe73be8cc54c5fba2e28fd462e3e91edde29c1`.
+- P1–P5b regression artifactBundleId: `b482430b0b2f27b153cd9af71e0c6a61dfc03dbac8ff4ad753be385883f75958`.
+  Различие ожидаемо: opt-in P6a включает harness, regression policy его исключает;
+  одинаковые APK между вариантами не требуются.
+- Probe host runId `4b671017-857a-4e29-a9d3-e43f9c5a9aae`;
+  Honor `dc3925c6-acce-4f64-b8a6-d5e27cb2d776`, emulator `201e9d27-eab0-4740-ae24-3a5a57ce6d9f`.
+
+Оба probe: authority=com.android.externalstorage.documents,
+package=com.android.externalstorage; mode=rw;no-truncate. Create, positionalWrite,
+fileFsync, interprocessLock, noTruncateReopenLengthHash=OBSERVED;
+identityStrategy=observed-fstat-dev-inode;NOT-qualified. Volume/backend=unknown,
+три durability-поля UNKNOWN, productionApproved=false,
+powerInterruption/processRestart=NOT_TESTED,
+cleanup=RETAINED_NO_QUALIFIED_DELETE_CONTRACT. Это ожидаемый результат P6a.1.
+
+Root hashes: Honor `4af0286f7f6db1fff1e398f26d57bffdcaf9958c8f035c02b5049e8eaa94efc1`,
+emulator `b53b0a25d2b032f08b7bd682b5d366a273d83a85c210012450118b78572d3b87`.
+Это observation labels; они не устанавливают backend, подлинность root или guarantees
+и не включаются в allowlist. Условия приёмки P6a.1 закрыты пользователем; production
+qualification, power-loss, KDF benchmarks, P6b/P6c/security gates не закрыты.
+[Следующий отчёт P6a.2](p6a2-report.md) сохраняет эту границу. Ошибки и собственный
+Android NOT_RUN в следующих разделах — история соответствующих прежних сборок,
+а не отмена этого подтверждения и не PASS новых APK P6a.2.
 
 ## Повторное исправление bootstrap и сценариев перезапуска
 
@@ -572,7 +620,7 @@ P6a runtime13 на каждом Honor15/emulator17, затем отдельно 
 там же с обоими mappings/SHA256/source provenance. Provider отдельно:
 `app/build/reports/p6a-provider/<runId>/<device>/provider-result.txt`.
 
-PR Draft до двухустройственной Android матрицы; production admission/P6a.2,
+Историческое требование передачи PR13 до подтверждения выше: PR Draft до двухустройственной Android матрицы; production admission/P6a.2,
 полный P6b lifecycle/leaks/OEM, P6c UI, иконки папок/порядок каталога и независимая
 security review остаются будущими задачами. Размеры60dp/строка≥72dp и demo сохранены.
 Криптография/container1.1/1.2/cards/icons не менялись. Настоящие секретные данные

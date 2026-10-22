@@ -46,6 +46,11 @@ class P6aProviderProbeActivity : Activity() {
         val current=token ?: return; token=null
         val root=try { picker.accept(current,resultCode,data,contentResolver) } catch(_: Exception) { finishReceipt("grant=ERROR\n"); return }
         if(root==null) { finishReceipt("picker=CANCELLED\n"); return }
+        if(intent.getBooleanExtra("qualificationPrimaryOnly",false) &&
+            (root.authority!="com.android.externalstorage.documents" ||
+                !DocumentsContract.getTreeDocumentId(root).startsWith("primary:"))) {
+            finishReceipt("probeOperations=UNSUPPORTED\nscope=PRIMARY_REQUIRED_BEFORE_CREATE\n"); return
+        }
         status.text="Проверка выполняется вне UI. Не используйте эту папку для личных файлов."
         Thread({ probe(root) },"p6a-scratch-io").start()
     }

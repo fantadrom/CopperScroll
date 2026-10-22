@@ -163,6 +163,12 @@ probe/controller. Отрицательный production admission обязате
 contract отсутствует в ordinary release. Отдельный Draft PR, Android подтверждение
 на Honor15 и emulator17; build/host PASS не runtime PASS.
 
+P6a.1 принят пользователем22.10.2026 после91ff18b: [receipt identifiers](validation/p6a-report.md).
+P6a.2: [исследование контрактов](storage-provider-qualification.md),
+[новый отчёт и ID-матрица](validation/p6a2-report.md),
+[предложенный ADR](adr/001-saf-durability-boundary.md). Инструменты/исследование PR
+и production admission — разные результаты; общий P6a пока открыт.
+
 **P6a.2, qualification:** provider/AOSP contracts и controlled interruption,
 namespace/local-state/power-loss evidence конкретных roots/backend/device builds.
 Probe, process death и обычный reboot не заменяют power-loss доказательство.
