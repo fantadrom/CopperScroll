@@ -1,6 +1,9 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <queries><provider android:authorities="com.fantadrom.copperscroll.p1runtime.p6a.documents" /></queries>
     <application>
+        <service android:name="com.fantadrom.copperscroll.storage.runtime.ExternalGrantOwnerService"
+            android:exported="true" android:process=":p6aGrantOwner"
+            android:permission="com.fantadrom.copperscroll.p1runtime.p6a.GRANT_CONTROL" />
         <!-- Separate instrumentation APK UID: a real external URI-grant boundary. -->
         <provider android:name="com.fantadrom.copperscroll.storage.runtime.ExternalGrantDocumentsProvider"
             android:authorities="${applicationId}.p6a.external.documents" android:exported="true"

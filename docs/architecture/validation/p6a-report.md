@@ -13,6 +13,137 @@ Production allowlist пуста. P6a.1/P6a в целом ещё не приня�
 P5b/regression результаты прежней пары отдельно добавлены в
 [p5b-report](p5b-report.md); они не подтверждают новые adapters/APK P6a.
 
+## Повторное исправление bootstrap и сценариев перезапуска
+
+Актуальный head PR13 перед изменениями подтверждён fetch/API:
+`c4f8ebe15e63bd03cf4c6d3c06cfd98618117644`, ветка
+`codex/copper-scroll-p6a1-saf-adapters`, PR открыт/Draft, без merge.
+В новом пользовательском p1-diagnostics.zip оба XML (Honor ABR-LX1 Android15,
+Virtual_Pixel_6 Android17) содержат13 тестов,2 failures,0 errors/skip:11 PASS,
+отказы explicitModesAndNegativeAdmission и grantLossReplacementAndProfileMismatch.
+Windows Terminal подтверждает BUILD FAILED connected и запуск финализатора.
+Это пользовательский прогон предыдущего исправления, не PASS текущего кода.
+
+Retrace выполнен по test-mapping.txt именно из этого ZIP: map ID
+de9e28fde918e0313d39822c14a5579c1111cb4dc21eae3140b9889e7fc76987,
+SHA256 e4c5161d1d6581700862565e114fbbbe638bcfd2cf243244351cb337c5f705bd.
+ID совпадает с тестовыми стеками; target mapping не применялся к test APK.
+Восстановленные места: P6aSafRuntimeTest.kt:167 (прежний death/reject) и
+:97/:101 (externalGrantAccess → ContentResolver.call).
+Artifact bundle пользователя:97d73bd476fca25e3b10c16667f185991a6f9af46c1bd6bc66d4d1df575e27f6;
+target/test SHA256:128fa7b59bbe911c5147d98eee01431ab29d0cb0bd40f827d2b01c255a28a9e3 /
+a3e12778151fe275aa1a582067d12b5c1dd163d1938617dc3f475d200805e704.
+
+Причина bootstrap: отсутствие permission check внутри ContentProvider.call не
+отменяет предварительный барьер acquireProvider. До получения URI-grant процесс
+target не может приобрести внешний DocumentsProvider с MANAGE_DOCUMENTS.
+Прежний control через этот provider удалён. Новый ExternalGrantOwnerService в
+test APK работает отдельным процессом владельца URI. Bind защищён signature
+permission, объявленной/запрошенной только opt-in target; Binder transaction
+дополнительно проверяет точный UID/подпись target, interface token и полный payload.
+Разрешены лишь revoke/read для фиксированного synthetic URI и фиксированного target;
+нет произвольного адресата/URI/write-grant. Перед grant/revoke очищается calling
+identity, права выдаёт владелец. Клиент закрывает канал через use: revoke и unbind,
+ошибки cleanup сохраняют первоначальную ошибку. UI/нового пользовательского входа нет.
+Документный provider сохраняет MANAGE_DOCUMENTS и реальные проверки URI-grants.
+
+One-shot death ранее терялась вместе с HashMap; ContentResolver мог повторно
+открыть provider и успешно получить FD. Новый test-only ProviderRestartFaults
+пишет состояние в отдельный приватный файл и завершает write/fsync/close до смерти.
+deathOnce переходит once-armed → once-consumed → Allow; deathUnavailable переходит
+persistent-armed → unavailable и запрещает query/open после нового PID, пока не
+выполнен явный normal/clear. Один и тот же journal используется в provider и5 JVM
+тестах; повреждённая запись не сбрасывается, имена файлов пригодны для Windows.
+Это process-restart injection, не доказательство power-loss durability.
+
+В прежнем grantLossReplacementAndProfileMismatch сохранены отказы при denied,
+смене профиля, подмене identity и missing. На отдельном валидном artifact проверяются
+оба сценария смерти. Для one-shot разрешён framework retry либо один явный fresh
+open только после consumed; проверяются новый PID, store identity, полный production
+fingerprint, writable/admission и обе применимые гарантии store. Все проверки
+открытого store выполняются под use. Persistent сценарий требует отказа первого
+open и повторных read/write попыток, новый PID и сохранённое unavailable; только
+явное снятие fault позволяет открыть и заново проверить artifact. rejectOpen закрывает
+неожиданно открытый store и всё равно проваливает отрицательную проверку; ошибка
+close не превращается в ожидаемый отказ. Простой замены reject на успешный open нет.
+
+В explicitModesAndNegativeAdmission сохранены реальные no-grant/read-only/revoked
+отрицательные проверки другого UID и отдельное отсутствие durability approval.
+Все13 имён и exact-set/XML/protobuf/exit/freshness/source/artifact gate сохранены.
+Host APK audit теперь читает фактические AXML attributes: signature protectionLevel,
+permission service, exported/process, document provider ACL/authority. Транзитивные
+DEX references service/provider проверяются против class loader отдельного test UID.
+Оба Java-компонента и Binder-класс не требуют общей Kotlin runtime или backend target.
+Они исключены из ordinary release; production policy/три gates/пустая allowlist,
+R8 scope целевого/обычного release, версии и штатная подпись не меняются.
+
+Первый post-R8 audit отказал на зависимости отдельного test UID:
+ExternalGrantOwnerService → Binder$1 → xf1.c(String) → ActivityScenario →
+androidx.lifecycle.Lifecycle$State (последний существует только в target).
+Точный mapping этой сборки показывает xf1 как R8 synthetic ActivityScenario helper.
+Это обнаруженная статическая зависимость, не воспроизведённый агентом ART crash.
+Аудит оставлен строгим. DEX disassembly показывает xf1.c(String) как общий
+throw IllegalArgumentException(String); другие методы этого же synthetic класса
+ссылаются на ActivityScenario. Узкие test-only keep rules не устранили такой перенос
+и удалены. Исправлен исходный шаблон отказа недопустимого Binder payload:
+SecurityException без зависимости от общего exception helper. Авторизация/запрет
+лишних mode/payload остаются обязательными. Итоговые keep rules, target/ordinary
+release scope и остальная instrumentation не изменяются; R8 остаётся включён.
+Неудачная APK-пара/точный mapping сохранены в ignored work для отрицательного audit.
+
+Проверки текущего исправления: полный JVM suite162/0 failures/errors/skipped,
+27 XML suites, включая5 новых ProviderRestartFaultsTest. Все239 host checks
+(33/15/13/18/86/18/18/18/20) — PASS. Debug/debugAndroidTest собраны,
+lintDebug:0 errors/13 warnings/1 hint. Полный host/debug/lint запуск —7m08s.
+Windows-specific ветви здесь повторно не исполнялись; unit-файлы fault journal
+не содержат Windows-недопустимого двоеточия. Android runtime новых сценариев
+пока NOT_RUN; пользовательские11 PASS относятся к прежнему APK.
+
+Окончательные release/test сборки, R8, lintP1Release, APK/linkage/cold-loader/AXML
+ACL/isolation/source gates — PASS; финальная сборка2m29s, lint0 errors/25 warnings/
+1 hint. Test R8 configuration SHA25631d11d438266a0f152aee4b2bbbcb67b762a6465cebdde0bf1822bbcd81e01b6:
+добавленных owner keep rules нет. Отдельно отвергнуты4 isolation нарушения,
+неверная external authority,2 неверных owner ACL (normal вместо signature и
+чужая permission service),8 прежних generic нарушений. Сохранённый реальный
+промежуточный APK с xf1/Lifecycle зависимостью также отвергнут тем же строгим audit
+с его точным test mapping. Подписанные итоговые APK негативными тестами не изменены.
+
+Команды проверки (дополнительно --offline --no-daemon --no-parallel --max-workers=2):
+
+```sh
+bash gradlew :app:testDebugUnitTest :app:testP1RuntimeResults :app:testP2RuntimeResults :app:testP3RuntimeResults :app:testP4RuntimeResults :app:testP4SourceIdentity :app:testP5aRuntimeResults :app:testP5bRuntimeResults :app:testP6aRuntimeResults :app:testP6aRuntimeDiagnostics :app:assembleDebug :app:assembleDebugAndroidTest :app:lintDebug --console=plain
+bash gradlew -Pp6aReleaseRuntime=true :app:verifyP6aIsolation :app:verifyP4BuildIdentity :app:lintP1Release --console=plain
+python3 tools/p6a/check-isolation.py
+P1_AUDIT_ARGUMENTS=app/build/reports/p6a-runtime/audit-arguments.txt python3 tools/p1/check-apk-audit.py
+```
+
+Свежий adb devices -l завершился134 (Cannot mkdir /home/agent/.android, read-only);
+список устройств не получен, emulator/system images/dev-kvm отсутствуют.
+Фактический Android runtime новых сценариев **NOT_RUN**, не заменён сборкой.
+Все логи, exact retrace, промежуточный отрицательный APK и mappings сохранены
+в ignored work/p6a1-bootstrap-fix. Итоговые оба mappings/configs/SHA находятся
+в app/build/reports/p6a-runtime/p1-diagnostics.zip; sourceRevision=c4f8ebe15e63bd03cf4c6d3c06cfd98618117644,
+sourceCodeDirty/sourceDirty=true, wrapperModified=false, Gradle9.6.0/JVM25.0.4.1.
+Это подготовка до commit, не clean build будущего commit.
+
+```properties
+artifactBundleId=8c3f6df83188385005346495a4a23f70f8b9fbae224c5768c33fea7f85aae219
+targetSha256=03ef6ddd8e5aca584ff79fc30c0f6548a78a859c45389efceb8e7637c15fc432
+testSha256=dc4a6e204a0ff1af424985c81fc2da6ecab28f7d986b46437f87270d8c09d945
+targetMapId=d1caaecdae67ab7a10b5d7bdfe7071e8ce45ef7eb8be18495617bc953a26f7bc
+testMapId=bd17836b014269b717558216fbe1a0767e90ea7d75b66023b65c320cc7c13248
+sourceFingerprint=476f35325664a929e0b53474d2cbf45581a4de2a259e12b752ca1f9e53e3a94d
+runtime=NOT_RUN
+```
+
+Пользователю остаётся прежняя единая p6aReleaseRuntimeCheck из Windows инструкции:
+новые13 PASS/0 failures/errors/skipped на каждом Honor15/emulator17 и финальный
+BUILD SUCCESSFUL. Draft PR13 сохраняется без merge. P6a.2 qualification, P6b,
+P6c и отдельная регрессионная матрица этим исправлением не закрываются.
+
+Ниже сохранены исторические результаты первого исправления UID. Описание его
+старого bootstrap через provider заменяется текущим owner service, описанным выше.
+
 ## Исправление доступа после пользовательского прогона
 
 Перед исправлением PR13 открыт, Draft, head

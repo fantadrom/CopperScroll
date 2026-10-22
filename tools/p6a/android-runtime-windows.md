@@ -28,10 +28,21 @@ Provider и helper работают отдельными процессами т
 instrumentation исполняется с UID target. Это собственный provider, ему не
 подделывают внешний persistable grant. Проверка реальной выдачи grant — ниже.
 В test APK дополнительно находится синтетический external provider с другим UID.
-Он сам выдаёт target только read grant для проверки отказа write, затем отзывает
-его; это входит в explicitModesAndNegativeAdmission и не добавляет новых тестов
+Read grant выдаёт отдельный сервис владельца в test APK, защищённый signature
+permission, точным UID и подписью target. Bootstrap не обращается к закрытому
+DocumentsProvider до выдачи URI-grant; сам provider сохраняет MANAGE_DOCUMENTS.
+После проверки отказа write сервис отзывает read grant. Это входит
+в explicitModesAndNegativeAdmission и не добавляет новых тестов
 к обязательным13. В его отдельном процессе используются только Android/Java API,
 без зависимости от Kotlin/backend из target APK.
+Строгий post-R8 audit проверяет независимость обоих компонентов от target class
+loader; keep rules и target/ordinary release scope не меняются.
+
+В grantLossReplacementAndProfileMismatch отдельно проверяются однократная смерть
+с восстановлением и устойчивая недоступность после перезапуска. Fault-состояние
+записывается до смерти в приватный файл provider. При восстановлении проверяются
+смена PID, identity, полный fingerprint и применимые гарантии; store закрывается.
+Для устойчивого отказа перезапуск не сбрасывает fault, разрешено лишь явное снятие.
 
 p1Release отличается от ordinary release applicationId suffix, локальной
 тестовой подписью, instrumentation ABI и тестовой policy/компонентами P6a.

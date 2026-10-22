@@ -106,9 +106,11 @@ android {
             getByName("androidTest").manifest.srcFile("src/p6aAndroidTest/AndroidManifest.xml")
             getByName("androidTest").assets.directories.add("src/p6aAndroidTest/assets")
             getByName("p1Release").kotlin.directories.add("src/p6aHarness/kotlin")
+            getByName("p1Release").kotlin.directories.add("src/p6aModel/kotlin")
             getByName("p1Release").manifest.srcFile("src/p6aHarness/AndroidManifest.xml")
         }
         getByName("test").kotlin.directories.add("src/testShared/kotlin")
+        getByName("test").kotlin.directories.add("src/p6aModel/kotlin")
         getByName("androidTest").kotlin.directories.add("src/testShared/kotlin")
         if (p2KdfBenchmark) getByName("androidTest").kotlin.directories.add("src/p2Benchmark/kotlin")
     }
@@ -278,7 +280,7 @@ if (p1ReleaseRuntime) {
     }
     val compileP1ApkVerifier = tasks.register<JavaCompile>("compileP1ApkVerifier") {
         source(rootProject.file("tools/p1/VerifyRuntimeApks.java"), rootProject.file("tools/p1/DexRuntimeLinkage.java"),
-            rootProject.file("tools/p1/P1ArtifactDiagnostics.java"))
+            rootProject.file("tools/p1/P1ArtifactDiagnostics.java"),rootProject.file("tools/p1/P6aManifestAudit.java"))
         classpath = files()
         destinationDirectory.set(layout.buildDirectory.dir("p1-apk-verifier/classes"))
         options.release.set(11)

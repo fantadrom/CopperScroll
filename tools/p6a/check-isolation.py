@@ -4,6 +4,7 @@ import hashlib
 import os
 from pathlib import Path
 import subprocess
+import struct
 import tempfile
 import zipfile
 
@@ -60,3 +61,63 @@ with tempfile.TemporaryDirectory(prefix='p6a-external-audit-') as owned:
     assert p.returncode != 0 and 'External grant provider manifest/authority missing' in p.stderr, p.stdout + p.stderr
 assert test_hash == hashlib.sha256(test_apk.read_bytes()).hexdigest()
 print('P6a external-provider manifest negative audit PASS; APK unchanged; Android NOT_RUN')
+
+def change_attribute(blob, tag, component, attribute, value):
+    """Change a typed AXML attribute only; preserve the real DEX and every other attribute."""
+    b = bytearray(blob)
+    strings = []
+    offset = struct.unpack_from('<H', b, 2)[0]
+    while offset < len(b):
+        kind, header, size = struct.unpack_from('<HHI', b, offset)
+        if kind == 1:
+            count, _, flags, start = struct.unpack_from('<4I', b, offset + 8)
+            def length(p, utf8):
+                n = b[p] if utf8 else struct.unpack_from('<H', b, p)[0]
+                p += 1 if utf8 else 2
+                mask = 128 if utf8 else 32768
+                if n & mask:
+                    second = b[p] if utf8 else struct.unpack_from('<H', b, p)[0]
+                    n = ((n & (mask - 1)) << (8 if utf8 else 16)) | second
+                    p += 1 if utf8 else 2
+                return n, p
+            for i in range(count):
+                p = offset + start + struct.unpack_from('<I', b, offset + header + 4 * i)[0]
+                n, p = length(p, bool(flags & 256))
+                if flags & 256:
+                    n, p = length(p, True)
+                else:
+                    n *= 2
+                strings.append(bytes(b[p:p+n]).decode('utf-8' if flags & 256 else 'utf-16le'))
+        elif kind == 0x102 and strings[struct.unpack_from('<I', b, offset + 20)[0]] == tag:
+            start, stride, count = struct.unpack_from('<3H', b, offset + 24)
+            attrs = {}
+            for i in range(count):
+                p = offset + 16 + start + stride * i
+                attrs[strings[struct.unpack_from('<I', b, p + 4)[0]]] = p
+            name = attrs.get('name')
+            if name is not None and strings[struct.unpack_from('<I', b, name + 16)[0]] == component:
+                struct.pack_into('<I', b, attrs[attribute] + 16, value(strings) if callable(value) else value)
+                return bytes(b)
+        offset += size
+    raise AssertionError('AXML mutation target absent')
+
+for which, tag, component, attribute, value, expected in (
+    (0, 'permission', 'com.fantadrom.copperscroll.p1runtime.p6a.GRANT_CONTROL', 'protectionLevel', 0,
+     'Grant owner permission must be signature-only'),
+    (1, 'service', 'com.fantadrom.copperscroll.storage.runtime.ExternalGrantOwnerService', 'permission',
+     lambda pool: pool.index('android.permission.MANAGE_DOCUMENTS'), 'Grant owner channel missing or unprotected'),
+):
+    source = Path(arguments[which])
+    with tempfile.TemporaryDirectory(prefix='p6a-owner-acl-') as owned:
+        temporary = Path(owned); mutated = temporary / 'bad-acl.apk'
+        with zipfile.ZipFile(source) as src, zipfile.ZipFile(mutated, 'w') as dst:
+            manifest = change_attribute(src.read('AndroidManifest.xml'), tag, component, attribute, value)
+            for entry in src.infolist():
+                dst.writestr(entry, manifest if entry.filename == 'AndroidManifest.xml' else src.read(entry))
+        args = arguments.copy(); args[which] = str(mutated)
+        args[3] = str(temporary / 'audit.txt'); args[6] = str(temporary / 'p6a-runtime')
+        p = subprocess.run([java, '-cp', classes, 'VerifyRuntimeApks', *args], capture_output=True, text=True, timeout=120)
+        assert p.returncode != 0 and expected in p.stderr, p.stdout + p.stderr
+assert original == [hashlib.sha256(p.read_bytes()).hexdigest() for p in (release, harness)]
+assert test_hash == hashlib.sha256(test_apk.read_bytes()).hexdigest()
+print('P6a grant owner ACL: 2 negative audits PASS; signed APKs unchanged; Android NOT_RUN')

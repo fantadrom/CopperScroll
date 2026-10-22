@@ -53,9 +53,10 @@ public final class VerifyRuntimeApks {
                     require(real.containsKey("Lcom/fantadrom/copperscroll/storage/android/"+type+";"),"Android adapter missing from ordinary release: "+type);
                 require(real.keySet().stream().noneMatch(n->n.startsWith("Lcom/fantadrom/copperscroll/p6aharness/")),"Test controls/provider/helper leaked into ordinary release");
                 require(!real.containsKey("Lcom/fantadrom/copperscroll/storage/runtime/ExternalGrantDocumentsProvider;"),"External test provider leaked into ordinary release");
+                require(real.keySet().stream().noneMatch(n->n.startsWith("Lcom/fantadrom/copperscroll/storage/runtime/ExternalGrantOwnerService")),"Grant owner service leaked into ordinary release");
                 byte[] manifest=release.getInputStream(release.getEntry("AndroidManifest.xml")).readAllBytes();
                 require(!new String(manifest,StandardCharsets.UTF_8).contains("p6aharness") && !new String(manifest,StandardCharsets.UTF_16LE).contains("p6aharness"),"Harness manifest leaked into ordinary release");
-                for(String type:List.of("ControlledDocumentsProvider","P6aHelperService","P6aProviderProbeActivity","HarnessFaults"))
+                for(String type:List.of("ControlledDocumentsProvider","P6aHelperService","P6aProviderProbeActivity","HarnessFaults","ProviderRestartFaults"))
                     require(test.containsKey("Lcom/fantadrom/copperscroll/p6aharness/"+type+";"),"P6a test component missing: "+type);
             }
             System.out.println("P6a ordinary release isolation PASS; runtime=NOT_RUN"); return;
@@ -110,23 +111,27 @@ public final class VerifyRuntimeApks {
                 require(testClasses.contains(p6aSuite),"P6a suite missing from test APK");
                 String external="Lcom/fantadrom/copperscroll/storage/runtime/ExternalGrantDocumentsProvider;";
                 require(testClasses.contains(external) && !appClasses.contains(external),"External grant provider must belong to the distinct test APK only");
+                String owner="Lcom/fantadrom/copperscroll/storage/runtime/ExternalGrantOwnerService;";
+                require(testClasses.contains(owner) && appClasses.stream().noneMatch(n->n.startsWith(owner.substring(0,owner.length()-1))),"Grant owner must belong to the distinct test APK only");
                 // A separately launched test-UID provider cannot use the target's shared Kotlin
                 // runtime. Audit its real post-R8 code, not just the combined instrumentation loader.
-                for(var edge:testIndex.edges) if(edge.caller.equals(external)) {
+                Set<String> standalone=new HashSet<>(List.of(external,owner));
+                List<String> pending=new ArrayList<>(standalone);
+                for(int p=0;p<pending.size();p++) for(var edge:testIndex.edges) if(edge.caller.equals(pending.get(p))) {
                     List<String> types=new ArrayList<>();
                     if(edge.type!=null) types.add(edge.type);
                     if(edge.member!=null) { types.add(edge.member.owner); types.addAll(edge.member.types); }
                     for(String t:types) {
                         while(t.startsWith("[")) t=t.substring(1);
-                        require(!t.startsWith("L") || t.equals(external) || t.startsWith("Landroid/") || t.startsWith("Ljava/"),"External grant provider requires nonplatform class outside its standalone loader: "+t);
+                        if(!t.startsWith("L") || t.startsWith("Landroid/") || t.startsWith("Ljava/")) continue;
+                        require(testClasses.contains(t),"External grant owner/provider requires class outside its standalone loader: "+t);
+                        if(standalone.add(t)) pending.add(t);
                     }
                 }
-                byte[] manifestBytes=tests.getInputStream(tests.getEntry("AndroidManifest.xml")).readAllBytes();
-                String testManifest=new String(manifestBytes,StandardCharsets.UTF_16LE)+new String(manifestBytes,StandardCharsets.UTF_8);
-                require(testManifest.contains("ExternalGrantDocumentsProvider") && testManifest.contains(".test.p6a.external.documents") && testManifest.contains("MANAGE_DOCUMENTS"),"External grant provider manifest/authority missing");
+                P6aManifestAudit.check(app,tests);
                 for(String method:List.of("explicitModesAndNegativeAdmission","createTransactionCopyCompactRekey","readOnlyPipeVirtualAndStaleMetadata","grantLossReplacementAndProfileMismatch","positionalShortInterruptedAndErrorIo","dataForceDoesNotPublishNamespaceAndUnknownCreate","noBackupPublicationFaultsAndWholeRecords","aliasInterprocessLocksAndContinuousReopen","blockingIoRevokeRetainsOwnerUntilQuiescence","processRestartLocalLockAndBoundGenerationProgress","pickerCancellationStaleAndRequiredFlags","corruptLostAndVersionedLocalStateNeverReset","switchRevocationLostAckAndDistinctRecoveryCredentials"))
                     require((testIndex.classes.get(p6aSuite).methods.getOrDefault(method+"()V",0)&1)!=0,"P6a runtime method missing: "+method);
-                for(String type:List.of("ControlledDocumentsProvider","P6aHelperService","P6aProviderProbeActivity","HarnessFaults"))
+                for(String type:List.of("ControlledDocumentsProvider","P6aHelperService","P6aProviderProbeActivity","HarnessFaults","ProviderRestartFaults"))
                     require(appClasses.contains("Lcom/fantadrom/copperscroll/p6aharness/"+type+";"),"P6a target harness missing: "+type);
             } else require(appClasses.stream().noneMatch(n->n.startsWith("Lcom/fantadrom/copperscroll/p6aharness/")),"P6a harness present without opt-in");
             String p5bSuite="Lcom/fantadrom/copperscroll/storage/runtime/P5bChangeSecretRuntimeTest;";

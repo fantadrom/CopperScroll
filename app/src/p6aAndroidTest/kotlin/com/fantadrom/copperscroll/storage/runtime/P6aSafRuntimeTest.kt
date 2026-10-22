@@ -40,6 +40,11 @@ class P6aSafRuntimeTest {
     private fun reject(block: ()->Unit): Throwable {
         try { block() } catch(e: Exception) { return e }; error("Expected refusal")
     }
+    private fun rejectOpen(uri: Uri,write: Boolean=false): Throwable {
+        val opened=try { factory.openOriginal(uri,write) } catch(e: Exception) { return e }
+        opened.store.use { } // A close failure must not turn an unexpected open into a passing refusal.
+        error("Expected refusal")
+    }
     private fun created(): Pair<Artifact,RandomAccessStore> = factory.create(root("a"))
     private fun localName()="p6a-test-"+UUID.randomUUID()
     private fun seeded(image: ByteArray = P4Fixtures.image()): Artifact {
@@ -86,27 +91,27 @@ class P6aSafRuntimeTest {
             }
         }
         check(before==control("count").getInt("creates"))
-        factory.openOriginal(Uri.parse(a.uri),true).let { check(!it.writable && !it.store.guarantees.existingWriteDurable); it.store.close() }
-        reject { factory.openOriginal(DocumentsContract.buildDocumentUri(authority,"a:"+UUID.randomUUID())) }
+        factory.openOriginal(Uri.parse(a.uri),true).let { opened -> opened.store.use { check(!opened.writable && !it.guarantees.existingWriteDurable) } }
+        rejectOpen(DocumentsContract.buildDocumentUri(authority,"a:"+UUID.randomUUID()))
         check(before==control("count").getInt("creates"))
     }
     private fun externalGrantAccess() {
         val external=InstrumentationRegistry.getInstrumentation().context.packageName+".p6a.external.documents"
         val uri=DocumentsContract.buildDocumentUri(external,"synthetic")
         check(context.packageManager.resolveContentProvider(external,0)!!.applicationInfo.uid!=Process.myUid())
-        fun grant(value: String) { context.contentResolver.call(Uri.parse("content://$external"),"p6a.grant",value,null)!! }
         fun denied(write: Boolean) {
             check((reject { factory.inspect(uri,write) } as StoreException).code==IoCode.AccessLost)
         }
-        grant("none")
-        try {
+        ExternalGrantControl(context,InstrumentationRegistry.getInstrumentation().context.packageName).use { owner ->
+            owner.setReadGrant(false)
             denied(false); denied(true)
-            grant("read")
+            owner.setReadGrant(true)
             check(context.checkUriPermission(uri,Process.myPid(),Process.myUid(),Intent.FLAG_GRANT_READ_URI_PERMISSION)==PackageManager.PERMISSION_GRANTED)
             check(factory.inspect(uri).decision.granted.isEmpty()) // Read access is not durability.
             denied(true) // Metadata advertises write; a read-only grant still cannot authorize it.
-        } finally { grant("none") }
-        denied(false)
+            owner.setReadGrant(false)
+            denied(false); denied(true)
+        }
     }
     @Test fun createTransactionCopyCompactRekey() {
         val (a,s)=created()
@@ -150,21 +155,58 @@ class P6aSafRuntimeTest {
     @Test fun readOnlyPipeVirtualAndStaleMetadata() {
         val a=seeded(); val uri=Uri.parse(a.uri)
         mode(uri,"readonly"); factory.openOriginal(uri).store.use { check(it.size>131072); reject { it.writeFullyAt(0,byteArrayOf(0)) } }
-        reject { factory.openOriginal(uri,true) }
-        mode(uri,"readonlyFd"); reject { factory.openOriginal(uri,true) }
-        for(m in listOf("pipe","virtual")) { mode(uri,m); reject { factory.openOriginal(uri) } }
+        rejectOpen(uri,true)
+        mode(uri,"readonlyFd"); rejectOpen(uri,true)
+        for(m in listOf("pipe","virtual")) { mode(uri,m); rejectOpen(uri) }
         for(m in listOf("staleSize","unknownLength")) { mode(uri,m); factory.openOriginal(uri).store.use { check(it.size>131072); check(it.readFullyAt(0,8).size==8) } }
     }
     @Test fun grantLossReplacementAndProfileMismatch() {
         val a=seeded(); val uri=Uri.parse(a.uri); val opened=factory.openRequired(uri)
         try {
-            mode(uri,"denied"); reject { opened.readFullyAt(0,1) }; reject { factory.openOriginal(uri) }; mode(uri,"normal")
+            mode(uri,"denied"); reject { opened.readFullyAt(0,1) }; rejectOpen(uri); mode(uri,"normal")
             control("backend","version-changed"); reject { opened.readFullyAt(0,1) }; reject { factory.create(root("b")) }
         } finally { opened.close() }
         control("backend","p6a-controlled-v1"); control("replace",DocumentsContract.getDocumentId(uri))
         reject { SafMaintenanceDocuments(factory,a,root("b"),root("c")).checkIdentity(a) }
-        mode(uri,"missing"); reject { factory.openOriginal(uri) }
-        mode(uri,"death"); reject { factory.openOriginal(uri) }
+        mode(uri,"missing"); rejectOpen(uri)
+        providerRestartScenarios()
+    }
+    private fun providerRestartScenarios() {
+        // An independent, valid artifact: the earlier file-replacement refusal remains mandatory.
+        val a=seeded(); val uri=Uri.parse(a.uri)
+        val baseline=factory.openOriginal(uri,true)
+        val expectedGate=baseline.decision.granted
+        val expected=baseline.store.use { store ->
+            check(baseline.writable && store.guarantees.existingWriteDurable && store.guarantees.durableCreateIdentity)
+            fingerprint(store,a.uri)
+        }
+        fun verify(opened: OpenedSafDocument) = opened.store.use { store ->
+            check(opened.writable && opened.decision.granted==expectedGate)
+            check(store.guarantees.existingWriteDurable && store.guarantees.durableCreateIdentity)
+            check(store.identity==a.identity && sameFingerprint(fingerprint(store,a.uri),expected))
+        }
+        fun state()=control("restartFault",DocumentsContract.getDocumentId(uri)).getString("state")
+        val before=control("pid").getInt("pid")
+        mode(uri,"deathOnce")
+        val recovered=try { factory.openOriginal(uri,true) } catch(e: StoreException) {
+            // Some Android versions retry the unstable provider internally; others report the
+            // first loss. Only a consumed one-shot fault permits ONE explicit fresh open.
+            if(e.code !in setOf(IoCode.Eio,IoCode.AccessLost)) throw e
+            try { if(state()!="once-consumed") throw e } catch(c: Throwable) { if(c!==e) e.addSuppressed(c); throw e }
+            factory.openOriginal(uri,true)
+        }
+        verify(recovered) // All assertions, including full content/identity, run under store.use.
+        check(control("pid").getInt("pid")!=before && state()=="once-consumed")
+        val recoveredPid=control("pid").getInt("pid")
+        mode(uri,"deathUnavailable")
+        var primary: Throwable?=null
+        try {
+            rejectOpen(uri,true)
+            check(control("pid").getInt("pid")!=recoveredPid && state()=="unavailable")
+            repeat(2) { rejectOpen(uri); rejectOpen(uri,true); check(state()=="unavailable") }
+        } catch(e: Throwable) { primary=e; throw e }
+        finally { try { mode(uri,"normal") } catch(clean: Throwable) { if(primary!=null) primary.addSuppressed(clean) else throw clean } }
+        verify(factory.openOriginal(uri,true)) // Explicit clearing, not restart alone, allows recovery.
     }
     @Test fun positionalShortInterruptedAndErrorIo() {
         val (_,s)=created(); s.use {
@@ -180,7 +222,7 @@ class P6aSafRuntimeTest {
     @Test fun dataForceDoesNotPublishNamespaceAndUnknownCreate() {
         val (a,s)=created(); s.use { it.writeFullyAt(0,byteArrayOf(1,2)); it.force(); it.writeFullyAt(2,byteArrayOf(9,9)) }
         control("dataLoss"); factory.openRequired(Uri.parse(a.uri)).use { check(it.size==2L && it.readFullyAt(0,2).contentEquals(byteArrayOf(1,2))) }
-        control("namespaceLoss"); reject { factory.openOriginal(Uri.parse(a.uri)) }
+        control("namespaceLoss"); rejectOpen(Uri.parse(a.uri))
         val (kept,k)=created(); k.use { it.writeFullyAt(0,byteArrayOf(4)); it.force(); it.forceIdentity() }
         control("namespaceLoss"); factory.openRequired(Uri.parse(kept.uri)).use { check(it.size==1L) }
         control("namespace","off"); val (_,unverified)=created(); unverified.use { it.force(); reject { it.forceIdentity() } }

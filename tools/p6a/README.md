@@ -28,6 +28,18 @@ gate и не создаёт runtime PASS. Доступ собственного 
 ProviderInfo.applicationInfo.uid; внешний требует полный read/write URI-grant.
 Реальная граница разных UID проверяется synthetic provider в test APK, без второй
 копии backend или общей Kotlin-зависимости в его отдельном процессе.
+Bootstrap grant идёт через отдельный owner service с signature permission и
+проверкой точного UID/подписи; DocumentsProvider остаётся закрытым до grant.
+Audit читает фактические AXML ACL и транзитивные DEX ссылки обоих отдельных процессов.
+Недопустимый Binder payload получает SecurityException: исключён шаблон throw
+IllegalArgumentException(String), который compiler переносил в общий synthetic
+helper с target-only AndroidX ссылками. Keep rules и optimization scope прежние.
+
+ProviderRestartFaults — test-only файл состояния процесса: one-shot потребляется
+до смерти, persistent fault после перезапуска остаётся unavailable до явного clear.
+Пять JVM-тестов проверяют новые экземпляры journal, повторный отказ, clear,
+повреждение и границы имён. Runtime проверяет восстановленные identity/полный
+fingerprint/гарантии и закрытие store, сохраняя отрицательные проверки и13 методов.
 
 productionPolicy компилируется в debug/ordinary release и p1Release регрессий.
 p6aHarness подставляет policy только в явно выбранный p1Release; классы provider,

@@ -15,6 +15,7 @@ import java.util.UUID
 /** Same target UID, separate process. Not a power-interruption simulator or a real-provider proof. */
 class ControlledDocumentsProvider : DocumentsProvider() {
     private val base get()=File(context!!.noBackupFilesDir,"p6a-provider")
+    private val restartFaults by lazy { ProviderRestartFaults(File(base,"restart-faults")) }
     private val modes=HashMap<String,String>()
     private val published=HashSet<String>()
     private var backend="p6a-controlled-v1"
@@ -34,7 +35,7 @@ class ControlledDocumentsProvider : DocumentsProvider() {
     }
     override fun queryDocument(documentId: String,projection: Array<out String>?): Cursor {
         caller(); val columns=projection ?: arrayOf("document_id","display_name","mime_type","flags","_size")
-        val f=file(documentId); if(!f.exists() || modes[canonical(documentId)]=="missing") throw FileNotFoundException()
+        val f=file(documentId); if(!f.exists() || modes[canonical(documentId)]=="missing" || restartFaults.state(canonical(documentId))=="unavailable") throw FileNotFoundException()
         val mode=modes[canonical(documentId)]
         if(mode=="denied") throw SecurityException("Synthetic grant denial")
         val flags=if(f.isDirectory) DocumentsContract.Document.FLAG_DIR_SUPPORTS_CREATE else
@@ -65,11 +66,17 @@ class ControlledDocumentsProvider : DocumentsProvider() {
         when(modes[id]) {
             "denied" -> throw SecurityException("Synthetic denial")
             "missing" -> throw FileNotFoundException()
-            "death" -> { Process.killProcess(Process.myPid()); throw FileNotFoundException() }
             "pipe","virtual" -> { val pipe=ParcelFileDescriptor.createPipe(); pipe[1].close(); return pipe[0] }
         }
         if(!f.isFile) throw FileNotFoundException()
         if(mode!="r" && mode!="rw") throw IllegalArgumentException("No truncation mode")
+        // Commit the consumed/unavailable state before death. Framework retry starts a new
+        // provider process; an in-memory switch cannot describe persistent unavailability.
+        when(restartFaults.beforeOpen(id)) {
+            ProviderRestartFaults.Action.Die -> { Process.killProcess(Process.myPid()); throw FileNotFoundException() }
+            ProviderRestartFaults.Action.Unavailable -> throw FileNotFoundException()
+            ProviderRestartFaults.Action.Allow -> Unit
+        }
         if(mode=="rw" && modes[id]=="readonly") throw SecurityException("Read only")
         return ParcelFileDescriptor.open(f,if(mode=="rw" && modes[id]!="readonlyFd") ParcelFileDescriptor.MODE_READ_WRITE else ParcelFileDescriptor.MODE_READ_ONLY)
     }
@@ -102,7 +109,18 @@ class ControlledDocumentsProvider : DocumentsProvider() {
                 published.add(canonical(id)); out.putBoolean("published",true)
             }
             "p6a.reset" -> { base.deleteRecursively(); base.mkdirs(); modes.clear(); published.clear(); backend="p6a-controlled-v1"; creates=0; namespaceSync=true; for(r in listOf("a","b","c")) file(r).mkdir() }
-            "p6a.mode" -> { modes[arg!!]=extras!!.getString("mode")!! }
+            "p6a.mode" -> {
+                val id=canonical(arg!!)
+                val mode=extras!!.getString("mode")!!
+                if(id=="create") { require(mode in setOf("before","after","normal")); modes[id]=mode }
+                else { file(id); when(mode) {
+                    "deathOnce" -> { restartFaults.arm(id,false); modes.remove(id) }
+                    "deathUnavailable" -> { restartFaults.arm(id,true); modes.remove(id) }
+                    "death" -> error("Use an explicit restart scenario")
+                    else -> { restartFaults.clear(id); modes[id]=mode }
+                } }
+            }
+            "p6a.restartFault" -> out.putString("state",restartFaults.state(canonical(arg!!)))
             "p6a.backend" -> backend=arg!!
             "p6a.namespace" -> namespaceSync=arg=="on"
             "p6a.namespaceLoss" -> for(r in listOf("a","b","c")) file(r).listFiles()?.forEach { f -> if("$r:${f.name}" !in published) f.delete() }

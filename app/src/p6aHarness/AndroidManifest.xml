@@ -1,4 +1,6 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <permission android:name="${applicationId}.p6a.GRANT_CONTROL" android:protectionLevel="signature" />
+    <uses-permission android:name="${applicationId}.p6a.GRANT_CONTROL" />
     <queries><provider android:authorities="${applicationId}.test.p6a.external.documents" /></queries>
     <application>
         <!-- DocumentsProvider.attachInfo requires exported + MANAGE_DOCUMENTS. Every data/control
