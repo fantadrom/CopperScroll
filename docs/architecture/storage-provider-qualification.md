@@ -119,3 +119,18 @@ raw scratch контейнером/VerifiedCopy и не запускают за�
 контракта нельзя повысить Unverified/CopyUnknown до VerifiedCopy/Activated.
 При достаточном протокольном ограничении требуется архитектурный выбор:
 [ADR-001](adr/001-saf-durability-boundary.md). Текущий PR его не принимает за пользователя.
+
+
+## Наблюдение Honor после reboot — 23 октября 2026
+
+[Переданное пользовательское подтверждение](validation/p6a2-report.md) разделяет data PASS и identity.
+На Honor process samples: SAMPLED_MATCHES_ONLY, после reboot45→46:
+**SAME_MODE_UNSTABLE_OBSERVED** — st_dev изменился и для r→r/rw→rw сохранённых
+baseline, inode совпал. Emulator process/reboot: MODE_DEPENDENT_OBSERVED,
+собранные same-mode samples совпали. Для обоих identity UNCONFIRMED,
+admission REFUSED, три durability guarantees UNKNOWN, power/storage interruption
+NOT_RUN. Этот результат не доказывает подмену и не даёт права нормализовать dev,
+заменять identity inode/хэшем или разрешать production provider.
+P6b.1 выполняется на synthetic данных. Перед P6c требуется явный выбор выполнимого
+storage-пути с определёнными гарантиями; app-private канонический working container
+пользователем не согласован и здесь не вводится.

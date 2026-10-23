@@ -16,6 +16,8 @@ import java.util.concurrent.TimeUnit
 
 /** Independent Linux process/FD table, same target UID/noBackup namespace. */
 class P6aHelperService : Service() {
+    private val lifecycleSession=com.fantadrom.copperscroll.storage.session.SessionCoordinator()
+    private val lifecycleProcessSession=java.util.UUID.randomUUID().toString()
     private var owner: ResourceOwner?=null
     private var local: AppPrivateLocalState?=null
     private val worker=HandlerThread("p6a-helper-io")
@@ -26,6 +28,7 @@ class P6aHelperService : Service() {
             var die=false
             try {
                 when(message.data.getString("action")) {
+                    "sessionStatus" -> { out.putString("status",lifecycleSession.snapshot().access.name); out.putString("session",lifecycleProcessSession) }
                     "qualificationStatus" -> out.putAll(QualificationSession.phase(this@P6aHelperService,message.data.getString("name")!!))
                     "qualificationPrepare", "qualificationProcess", "qualificationReboot" -> out.putAll(
                         QualificationSession.execute(this@P6aHelperService,message.data.getString("name")!!,message.data.getString("action")!!))
@@ -87,12 +90,18 @@ class P6aHelperService : Service() {
                     "die" -> { out.putString("status","dying"); die=true }
                     else -> error("Unknown helper operation")
                 }
-            } catch(e: StoreException) { out.putString("status",e.code.name) }
-            catch(e: Exception) { out.putString("status","error"); out.putString("failureType",e.javaClass.simpleName); e.message?.takeIf { it.matches(Regex("[A-Z_]{1,80}")) }?.let { out.putString("failureReason",it) } }
+            } catch(e: StoreException) { out.putString("status",e.code.name); safeFailure(out,e) }
+            catch(e: Exception) { safeFailure(out,e); out.putString("status","error"); out.putString("failureType",e.javaClass.simpleName); e.message?.takeIf { it.matches(Regex("[A-Z_]{1,80}")) }?.let { out.putString("failureReason",it) } }
             try { message.replyTo.send(Message.obtain().apply { data=out }) }
             finally { if(die) Handler(worker.looper).postDelayed({ Process.killProcess(Process.myPid()) },100) }
         }
     }) }
+    private fun safeFailure(out: Bundle,e: Throwable) {
+        out.putString("failureType",e.javaClass.name)
+        out.putInt("failureSuppressedCount",e.suppressed.size)
+        out.putString("failureFrames",e.stackTrace.take(12).joinToString(";") { "${it.className}.${it.methodName}:${it.lineNumber}" })
+        e.cause?.let { out.putString("failureCauseType",it.javaClass.name); out.putString("failureCauseFrames",it.stackTrace.take(8).joinToString(";") { f -> "${f.className}.${f.methodName}:${f.lineNumber}" }) }
+    }
     companion object { const val RESTART_SECRET="P6a synthetic restart target" }
     override fun onBind(intent: Intent): IBinder=messenger.binder
     private fun closeOwned() {

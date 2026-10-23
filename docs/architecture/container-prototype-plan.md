@@ -1,6 +1,6 @@
 # Copper Scroll: поэтапные задания на прототип контейнера1.1
 
-Статус: P1…P5a приняты по пользовательским runtime receipts; P4 расширяет нормы [карточками/1.2](container-p4-extension.md).
+Статус: P1…P5b и P6a.1 приняты; P6a.2 принят как исследование/инструменты23.10.2026, production admission REFUSED. P1…P5b приняты по пользовательским runtime receipts; P4 расширяет нормы [карточками/1.2](container-p4-extension.md).
 Ниже базовая последовательность этапов; P4 extension определяет актуальный scope. Основа:
 [design](container-design.md), [формат1.1](container-format-v1.md),
 [матрица проверок](container-test-plan.md), [решения R/C](container-review-resolution.md).
@@ -164,7 +164,7 @@ contract отсутствует в ordinary release. Отдельный Draft PR
 на Honor15 и emulator17; build/host PASS не runtime PASS.
 
 P6a.1 принят пользователем22.10.2026 после91ff18b: [receipt identifiers](validation/p6a-report.md).
-P6a.2: [исследование контрактов](storage-provider-qualification.md),
+P6a.2 принят23.10.2026 как [исследование контрактов](storage-provider-qualification.md),
 [новый отчёт и ID-матрица](validation/p6a2-report.md),
 [предложенный ADR](adr/001-saf-durability-boundary.md). Инструменты/исследование PR
 и production admission — разные результаты; общий P6a пока открыт.
@@ -180,6 +180,18 @@ device faults/namespace/local metadata. Доказать ExistingWriteDurable,
 DurableCreateIdentity, DurableLocalState на конкретных authority/build/root/volume/
 backend/API. **Выход:** SAF/DUR P0 и измеренные профили; до этого production
 allowlist пуст. Seek/probe не подтверждают power-loss.
+
+**P6b.1, параллельно P6a по ADR-001:** production session coordinator, Android
+signals/presentation port, немедленные revoke/hide и epoch capabilities,
+configuration/picker handoff, final checkpoint/IO-owner/Unknown boundary;
+synthetic opt-in test host и автоматическая suite + отдельный guided lifecycle probe.
+[Отчёт](validation/p6b1-report.md). Android приёмка требует новых пользовательских
+результатов; сборки и model tests её не заменяют. Реальный Workspace engine не подключён.
+
+**P6b.2, последующее отдельное поручение:** полная IME/autofill/content capture/
+clipboard/accessibility/reveal/share/drag/recents leak матрица, OEM/cloud backup и
+device transfer, ordinary-release runtime. Baseline P6b.1 не закрывает эти условия.
+Не выполнять factory reset личного Honor. Полный нормативный P6b не ослаблен.
 
 **P6b, вход P6a:** foreground таблица design§6.1: multi-resume/top-resumed/visibility/
 focus, Home/screen-off/own dialogs/rotation/resize/picker. Настроить manifest/XML

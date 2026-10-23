@@ -175,6 +175,36 @@ class TransactionCore internal constructor(val owner: ResourceOwner, private val
         if(token != null) requireIo(token.epoch === epoch,IoCode.AccessLost)
         owner.revoke(token?.permit)
     }
+    /** Short admission only: no core monitor, codec, traversal or syscall. */
+    fun reserveFinalCheckpoint(checkpoint: FinalCheckpoint): ClosingSave {
+        requireIo(checkpoint.core === this,IoCode.AccessLost)
+        val permit=owner.acceptCheckpoint(); checkpoint.reserve()
+        return ClosingSave(this,checkpoint,permit)
+    }
+    /** Admit at most current checkpoint T plus the one already captured successor. */
+    fun revokeWithFinalCheckpoint(closing: ClosingSave? = null) {
+        requireIo(closing == null || closing.core === this,IoCode.AccessLost)
+        owner.revoke(closing?.permit,drainActiveCheckpoint=true)
+    }
+    /** Worker only, after current IO returned. Reuses P3 commit/publication/Unknown verbatim. */
+    @Synchronized fun submitClosingSave(closing: ClosingSave): WriteOutcome {
+        if(closing.core !== this || !closing.consumed.compareAndSet(false,true)) return WriteOutcome(WriteCode.AccessLost)
+        if(owner.reconciliationRequired) return WriteOutcome(WriteCode.CommitUnknown)
+        if(!owner.admitsClosingSave(closing.permit)) return WriteOutcome(WriteCode.AccessLost)
+        return try { owner.execute(closing.permit) { checking(closing.permit) {
+            val s=snapshot ?: throw StoreException(IoCode.AccessLost)
+            val k=key ?: throw StoreException(IoCode.AccessLost)
+            val view=reader.openZone(s,k)
+            if(view.readOnly) return@checking WriteOutcome(WriteCode.UnsupportedVersion)
+            val request=closing.checkpoint.build(s,view,revision)
+            requireIo(request.checkpoint && request.retainedBytes <= 32L*1024*1024,IoCode.InvalidRange)
+            owner.adopt(request)
+            val token=try { register(closing.permit,Bytes(request.binding()),request) }
+                catch(e: Throwable) { owner.retire(request); throw e }
+            commit(token)
+        } } } catch(e: StoreException) { WriteOutcome(if(e.code == IoCode.Busy) WriteCode.Busy else ioCode(e)) }
+          catch(e: FormatException) { WriteOutcome(WriteCode.ValidationError) }
+    }
     @Synchronized internal fun <T> readZone(block: (ReadSnapshot,ZoneKey,ZoneView,ContainerReader,()->Unit) -> T): T {
         val permit = owner.accept()
         return owner.execute(permit) { checking(permit) {

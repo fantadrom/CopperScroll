@@ -7,8 +7,11 @@ import subprocess
 import struct
 import tempfile
 import zipfile
+import sys
 
 root = Path(__file__).resolve().parents[2]
+profile=sys.argv[1] if len(sys.argv)>1 else 'p6a'
+assert profile in ('p6a','p6b1')
 release = root / 'app/build/outputs/apk/release/app-release-unsigned.apk'
 harness = root / 'app/build/outputs/apk/p1Release/app-p1Release.apk'
 java = str(Path(os.environ['JAVA_HOME']) / 'bin/java')
@@ -38,7 +41,7 @@ print('P6a isolation audit: positive + 4 negatives PASS; APKs unchanged; Android
 
 # The external provider runs under the test APK's own UID/class loader. Its manifest
 # must be present as well as its DEX definition; generic combined linkage is insufficient.
-arguments = (root / 'app/build/reports/p6a-runtime/audit-arguments.txt').read_text().splitlines()
+arguments = (root / f'app/build/reports/{profile}-runtime/audit-arguments.txt').read_text().splitlines()
 test_apk = Path(arguments[1])
 test_hash = hashlib.sha256(test_apk.read_bytes()).hexdigest()
 with tempfile.TemporaryDirectory(prefix='p6a-external-audit-') as owned:
@@ -56,7 +59,7 @@ with tempfile.TemporaryDirectory(prefix='p6a-external-audit-') as owned:
     args = arguments.copy()
     args[1] = str(mutated)
     args[3] = str(temporary / 'audit.txt')
-    args[6] = str(temporary / 'p6a-runtime')
+    args[6] = str(temporary / f'{profile}-runtime')
     p = subprocess.run([java, '-cp', classes, 'VerifyRuntimeApks', *args], capture_output=True, text=True, timeout=120)
     assert p.returncode != 0 and 'External grant provider manifest/authority missing' in p.stderr, p.stdout + p.stderr
 assert test_hash == hashlib.sha256(test_apk.read_bytes()).hexdigest()
@@ -115,7 +118,7 @@ for which, tag, component, attribute, value, expected in (
             for entry in src.infolist():
                 dst.writestr(entry, manifest if entry.filename == 'AndroidManifest.xml' else src.read(entry))
         args = arguments.copy(); args[which] = str(mutated)
-        args[3] = str(temporary / 'audit.txt'); args[6] = str(temporary / 'p6a-runtime')
+        args[3] = str(temporary / 'audit.txt'); args[6] = str(temporary / f'{profile}-runtime')
         p = subprocess.run([java, '-cp', classes, 'VerifyRuntimeApks', *args], capture_output=True, text=True, timeout=120)
         assert p.returncode != 0 and expected in p.stderr, p.stdout + p.stderr
 assert original == [hashlib.sha256(p.read_bytes()).hexdigest() for p in (release, harness)]

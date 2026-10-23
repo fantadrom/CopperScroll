@@ -33,13 +33,14 @@ final class P6aManifestAudit {
         require(found.size()==1,"Missing/duplicate P6a manifest element: "+tag+" "+value);
         return found.get(0);
     }
-    private static final class Element {
+    static final class Element {
         final String tag,parent; final Map<String,String> attributes=new HashMap<>();
         Element(String tag,String parent) { this.tag=tag; this.parent=parent; }
     }
-    private static List<Element> read(ZipFile apk) throws Exception {
+    static List<Element> read(ZipFile apk) throws Exception { return read(apk,"AndroidManifest.xml"); }
+    static List<Element> read(ZipFile apk,String entry) throws Exception {
         byte[] bytes;
-        try(var in=apk.getInputStream(apk.getEntry("AndroidManifest.xml"))) { bytes=in.readNBytes(1024*1024+1); }
+        try(var in=apk.getInputStream(java.util.Objects.requireNonNull(apk.getEntry(entry),"Missing AXML: "+entry))) { bytes=in.readNBytes(1024*1024+1); }
         require(bytes.length<=1024*1024,"Manifest oversized");
         ByteBuffer b=ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN);
         require(u16(b,0)==3 && b.getInt(4)==bytes.length,"Invalid AXML header");
