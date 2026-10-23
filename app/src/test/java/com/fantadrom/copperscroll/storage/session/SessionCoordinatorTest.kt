@@ -13,8 +13,8 @@ import java.util.concurrent.*
 import java.util.concurrent.atomic.AtomicReference
 
 class SessionCoordinatorTest {
-    class Fixture : AutoCloseable {
-        val synthetic=SyntheticSession(); val c=SessionCoordinator(); val frames=ArrayList<SessionCoordinator.Snapshot>()
+    class Fixture(captureDiagnostics: Boolean=false) : AutoCloseable {
+        val synthetic=SyntheticSession(); val c=SessionCoordinator(captureDiagnostics); val frames=ArrayList<SessionCoordinator.Snapshot>()
         val opened=CountDownLatch(1)
         var w=c.attach({ frames.add(it); if(it.presented) opened.countDown() }); var seq=0L
         init { c.selectDocument(synthetic.document); signal() }

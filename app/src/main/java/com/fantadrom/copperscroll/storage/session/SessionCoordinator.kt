@@ -4,7 +4,7 @@ import com.fantadrom.copperscroll.storage.io.*
 import com.fantadrom.copperscroll.storage.transaction.*
 
 /** No Android/View, KDF, codec, IO, executor wait or presentation callback under this monitor. */
-class SessionCoordinator {
+class SessionCoordinator(captureDiagnostics: Boolean=false) {
     enum class Access { Locked, Unlocking, OpenMain, OpenDecoy, Revoked }
     enum class Reason { Home, ScreenOff, DeviceLocked, Invisible, NotTopResumed, FocusLost, DocumentChanged, Picker, Explicit, Destroyed }
     enum class Command { Read, Edit, Save, Maintenance, Backup, ChangeDocument }
@@ -19,8 +19,29 @@ class SessionCoordinator {
         val document: SessionDocument?,val purpose: String)
     class Signals(val visible: Boolean,val interactive: Boolean,val unlocked: Boolean,val topResumed: Boolean,
         val focused: Boolean,val ownFocus: OwnWindow?=null)
+    /** Read-only facts, including unknown (null). No window, credential, URI or content references. */
+    class Foreground internal constructor(val visible: Boolean?,val interactive: Boolean?,val unlocked: Boolean?,
+        val topResumed: Boolean?,val focused: Boolean?,val ownedFocus: Boolean,val windowAttached: Boolean,
+        val windowSerial: Long?,val signalSequence: Long,val ready: Boolean)
     class Snapshot internal constructor(val access: Access,val epoch: Long,val presented: Boolean,val owner: OwnerPhase?,
-        val reconciliationRequired: Boolean,val reason: Reason?,val handoff: Boolean,val pendingWork: Boolean,val pickerPending: Boolean)
+        val reconciliationRequired: Boolean,val reason: Reason?,val handoff: Boolean,val pendingWork: Boolean,val pickerPending: Boolean,
+        val foreground: Foreground,val unlockReady: Boolean)
+    enum class DiagnosticEvent { Attach, Detach, Signals, Handoff, Revoke, Document,
+        UnlockBegin, UnlockDenied, UnlockSubmitted, UnlockSubmissionRejected, UnlockClaimed, UnlockClaimRejected,
+        UnlockAccepted, UnlockCompletionRejected, UnlockFailed, UnlockAbandoned, UnlockWorkFinished, OwnerReleased }
+    class Transition internal constructor(val serial: Long,val event: DiagnosticEvent,val attemptEpoch: Long?,val state: Snapshot)
+    // Opt-in metadata only. Disabled for ordinary callers; no observer/callback under the guard.
+    private val history=if(captureDiagnostics) java.util.ArrayDeque<Transition>() else null
+    private var diagnosticSerial=0L
+    private fun record(event: DiagnosticEvent,attemptEpoch: Long?=null) {
+        val ring=history ?: return
+        if(diagnosticSerial==Long.MAX_VALUE) return
+        if(ring.size==128) ring.removeFirst()
+        ring.addLast(Transition(++diagnosticSerial,event,attemptEpoch,snapshotLocked()))
+    }
+    class Diagnostics internal constructor(val current: Snapshot,val history: List<Transition>)
+    fun diagnostics(): Diagnostics = synchronized(guard) { Diagnostics(snapshotLocked(),history?.toList() ?: emptyList()) }
+    fun diagnosticHistory(): List<Transition> = diagnostics().history
     class Revocation internal constructor(val session: AuthenticatedSession?,val closing: ClosingSave?,val pendingOwner: ResourceOwner?,val unused: FinalCheckpoint?)
     fun interface Presentation { fun changed(snapshot: Snapshot) }
     private val guard=Any(); private val issuer=Any()
@@ -35,14 +56,20 @@ class SessionCoordinator {
     private var picker: Picker?=null; private var lastReason: Reason?=null
     private var revocation: Revocation?=null
     private fun bump() { if(epoch==Long.MAX_VALUE) { exhausted=true; access=Access.Revoked; capability=null; attempt=null } else epoch++ }
+    private fun ownedFocus()=signals?.ownFocus?.let { it in scopes && it.window===window && it.epoch==epoch }==true
     private fun foreground(): Boolean {
         val s=signals ?: return false
         return !exhausted && window!=null && handoff==null && s.visible && s.interactive && s.unlocked && s.topResumed &&
-            (s.focused || s.ownFocus?.let { it in scopes && it.window===window && it.epoch==epoch }==true)
+            (s.focused || ownedFocus())
     }
+    /** Fresh idle login readiness; beginUnlock still performs the authoritative admission. */
+    private fun unlockReady()=foreground() && !open() && access!=Access.Unlocking && session==null && pendingOwner==null &&
+        unlockWork==null && picker==null && revocation==null && document!=null && epoch<Long.MAX_VALUE
+    private fun foregroundFacts()=Foreground(signals?.visible,signals?.interactive,signals?.unlocked,signals?.topResumed,
+        signals?.focused,ownedFocus(),window!=null,window?.serial,sequence,foreground())
     private fun open()=access==Access.OpenMain || access==Access.OpenDecoy
     private fun snapshotLocked()=Snapshot(access,epoch,open() && foreground() && session?.live()==true && command?.command!=Command.Maintenance,session?.core?.owner?.phase ?: pendingOwner?.phase,
-        session?.core?.owner?.reconciliationRequired ?: pendingOwner?.reconciliationRequired ?: false,lastReason,handoff!=null,unlockWork!=null || pendingOwner!=null || command!=null,picker!=null)
+        session?.core?.owner?.reconciliationRequired ?: pendingOwner?.reconciliationRequired ?: false,lastReason,handoff!=null,unlockWork!=null || pendingOwner!=null || command!=null,picker!=null,foregroundFacts(),unlockReady())
     fun snapshot()=synchronized(guard) { snapshotLocked() }
     private fun notifyPresentation() {
         val p: Presentation?; val s: Snapshot
@@ -55,7 +82,7 @@ class SessionCoordinator {
     fun attach(port: Presentation,transfer: Handoff?=null): Window {
         val w=synchronized(guard) {
             check(window==null) { "WINDOW_ALREADY_ATTACHED" }; requireIo(handoff==null || handoff===transfer,IoCode.AccessLost); requireIo(serial<Long.MAX_VALUE,IoCode.AccessLost)
-            Window(issuer,++serial).also { window=it; sequence=0; signals=null; presentation=port }
+            Window(issuer,++serial).also { window=it; sequence=0; signals=null; presentation=port; record(DiagnosticEvent.Attach) }
         }
         notifyPresentation(); return w
     }
@@ -64,7 +91,7 @@ class SessionCoordinator {
         try { synchronized(guard) {
             if(unlockWork!=null || pendingOwner!=null) { revokeLocked(Reason.DocumentChanged); throw StoreException(IoCode.Busy) }
             requireIo(!open() && session==null,IoCode.Busy)
-            bump(); document=next; attempt=null; picker=null; access=Access.Locked
+            bump(); document=next; attempt=null; picker=null; access=Access.Locked; record(DiagnosticEvent.Document)
         } } finally { notifyPresentation() }
     }
     fun signals(w: Window,seq: Long,s: Signals) {
@@ -79,22 +106,23 @@ class SessionCoordinator {
             if(hard!=null) revokeLocked(hard)
             if(handoff?.old!==w && s.interactive && s.unlocked && s.visible && s.topResumed && s.focused) handoff=null
             }
+            record(DiagnosticEvent.Signals)
         }
         notifyPresentation()
     }
     /** Known configuration transfer only, never a generic pause/focus debounce. */
     fun beginHandoff(w: Window): Handoff {
-        val h=synchronized(guard) { check(window===w && handoff==null); Handoff(issuer,epoch,w).also { handoff=it; scopes.clear() } }
+        val h=synchronized(guard) { check(window===w && handoff==null); Handoff(issuer,epoch,w).also { handoff=it; scopes.clear(); record(DiagnosticEvent.Handoff) } }
         notifyPresentation(); return h
     }
     fun detach(w: Window,configuration: Handoff?=null) {
         synchronized(guard) {
             if(window!==w) return
             if(configuration==null || handoff!==configuration || configuration.epoch!=epoch) revokeLocked(Reason.Destroyed)
-            window=null; signals=null; presentation=null; scopes.clear()
+            window=null; signals=null; presentation=null; scopes.clear(); record(DiagnosticEvent.Detach)
         }
     }
-    fun hardRevoke(reason: Reason) { synchronized(guard) { revokeLocked(reason) }; notifyPresentation() }
+    fun hardRevoke(reason: Reason) { synchronized(guard) { revokeLocked(reason); record(DiagnosticEvent.Revoke) }; notifyPresentation() }
     private fun revokeLocked(reason: Reason) {
         // Picker's expected external transition has separate signals; real Home/screen-off invalidates it.
         if(picker!=null && reason !in listOf(Reason.NotTopResumed,Reason.Invisible,Reason.FocusLost)) picker=null
@@ -115,43 +143,49 @@ class SessionCoordinator {
     fun takeRevocation(): Revocation?=synchronized(guard) { revocation.also { revocation=null } }
     fun beginUnlock(): Unlock {
         val t=try { synchronized(guard) {
-            if(pendingOwner!=null || unlockWork!=null) { revokeLocked(Reason.Explicit); throw StoreException(IoCode.Busy) }
-            requireIo(foreground() && !open() && session==null && pendingOwner==null,IoCode.Busy)
-            requireIo(picker==null && revocation==null,IoCode.Busy); val d=document ?: throw StoreException(IoCode.AccessLost)
-            bump(); requireIo(!exhausted,IoCode.AccessLost); access=Access.Unlocking; Unlock(issuer,epoch,d).also { attempt=it }
+            try {
+                if(pendingOwner!=null || unlockWork!=null) { revokeLocked(Reason.Explicit); throw StoreException(IoCode.Busy) }
+                requireIo(foreground() && !open() && session==null && pendingOwner==null,IoCode.Busy)
+                requireIo(picker==null && revocation==null,IoCode.Busy); val d=document ?: throw StoreException(IoCode.AccessLost)
+                bump(); requireIo(!exhausted,IoCode.AccessLost); access=Access.Unlocking
+                Unlock(issuer,epoch,d).also { attempt=it; record(DiagnosticEvent.UnlockBegin,it.epoch) }
+            } catch(e: StoreException) { record(DiagnosticEvent.UnlockDenied); throw e }
         } } finally { notifyPresentation() }; return t
     }
     fun submitUnlock(t: Unlock): Boolean=synchronized(guard) {
-        if(attempt!==t || t.issuer!==issuer || t.epoch!=epoch || t.submitted || unlockWork!=null || !foreground()) false
+        val accepted=if(attempt!==t || t.issuer!==issuer || t.epoch!=epoch || t.submitted || unlockWork!=null || !foreground()) false
         else { t.submitted=true; unlockWork=t; true }
+        record(if(accepted) DiagnosticEvent.UnlockSubmitted else DiagnosticEvent.UnlockSubmissionRejected,t.epoch); accepted
     }
     fun claimUnlock(t: Unlock,owner: ResourceOwner): Boolean=synchronized(guard) {
-        if(t.issuer!==issuer || attempt!==t || t.epoch!=epoch || !foreground() || pendingOwner!=null || session!=null || unlockWork!=null && unlockWork!==t || owner.store.identity!=t.document.store) false
+        val accepted=if(t.issuer!==issuer || attempt!==t || t.epoch!=epoch || !foreground() || pendingOwner!=null || session!=null || unlockWork!=null && unlockWork!==t || owner.store.identity!=t.document.store) false
         else { t.submitted=true; unlockWork=t; pendingOwner=owner; true }
+        record(if(accepted) DiagnosticEvent.UnlockClaimed else DiagnosticEvent.UnlockClaimRejected,t.epoch); accepted
     }
     /** On rejection the worker still owns the authenticated result and must dispose after IO. */
     fun completeUnlock(t: Unlock,result: AuthenticatedSession): Boolean {
         val accepted=synchronized(guard) {
-            if(t.issuer!==issuer || attempt!==t || t.epoch!=epoch || !foreground() || access!=Access.Unlocking ||
+            val ok=if(t.issuer!==issuer || attempt!==t || t.epoch!=epoch || !foreground() || access!=Access.Unlocking ||
                 pendingOwner!==result.core.owner || !t.document.matches(result.document) || !result.live()) false
             else {
                 pendingOwner=null; attempt=null; session=result; access=if(result.zone==UserZone.Main) Access.OpenMain else Access.OpenDecoy
                 capability=Capability(issuer,epoch,result); lastReason=null; true
             }
+            record(if(ok) DiagnosticEvent.UnlockAccepted else DiagnosticEvent.UnlockCompletionRejected,t.epoch); ok
         }; notifyPresentation(); return accepted
     }
     /** The factory may block before there is an owner to claim. Only its actual worker finally clears this fence. */
     fun unlockWorkFinished(t: Unlock) {
-        synchronized(guard) { if(unlockWork===t) unlockWork=null }; notifyPresentation()
+        synchronized(guard) { if(unlockWork===t) { unlockWork=null; record(DiagnosticEvent.UnlockWorkFinished,t.epoch) } }; notifyPresentation()
     }
     fun rejectUnlock(t: Unlock) {
-        synchronized(guard) { if(attempt===t) revokeLocked(Reason.Explicit) }; notifyPresentation()
+        synchronized(guard) { if(attempt===t) { revokeLocked(Reason.Explicit); record(DiagnosticEvent.UnlockFailed,t.epoch) } }; notifyPresentation()
     }
     fun unlockFailed(t: Unlock) {
-        synchronized(guard) { if(attempt===t && pendingOwner==null) { attempt=null; access=Access.Locked } }; notifyPresentation()
+        synchronized(guard) { if(attempt===t && pendingOwner==null) { attempt=null; access=Access.Locked; record(DiagnosticEvent.UnlockAbandoned,t.epoch) } }; notifyPresentation()
     }
     fun unlockFinished(owner: ResourceOwner) {
-        synchronized(guard) { if(pendingOwner===owner && owner.phase==OwnerPhase.Released) { pendingOwner=null; attempt=null; if(access==Access.Unlocking) access=Access.Locked } }
+        synchronized(guard) { if(pendingOwner===owner && owner.phase==OwnerPhase.Released) { pendingOwner=null; attempt=null; if(access==Access.Unlocking) access=Access.Locked; record(DiagnosticEvent.OwnerReleased) } }
         notifyPresentation()
     }
     fun admit(c: Capability,kind: Command): CommandTicket {
@@ -175,7 +209,7 @@ class SessionCoordinator {
     }
     fun ownerFinished(core: TransactionCore) {
         synchronized(guard) {
-            if(session?.core===core && core.owner.phase==OwnerPhase.Released) { session=null; checkpoint=null; command=null; access=Access.Locked }
+            if(session?.core===core && core.owner.phase==OwnerPhase.Released) { session=null; checkpoint=null; command=null; access=Access.Locked; record(DiagnosticEvent.OwnerReleased) }
         }; notifyPresentation()
     }
     fun registerOwnWindow(w: Window,kind: ScopeKind): OwnWindow=synchronized(guard) {

@@ -54,6 +54,15 @@ Gate отклоняет zero/partial/skipped/crash/foreign/stale XML/protobuf/ru
 artifactBundleId, hashes APK и обоих mappings. Completed count читается в этом файле,
 а не выводится из числа Gradle tasks. HTML: `app/build/reports/androidTests/connected/p1Release/`.
 
+После обновления PR №15 Home test ждёт настоящий уход Activity и новое foreground-
+состояние; один focus недостаточен. Вход по-прежнему один, без автоматического retry.
+При новом отказе XML/logcat содержат `P6B1_SAFE_TRACE`: attempt epoch/outcome,
+access/reason/owner/pendingWork/handoff, foreground facts и ограниченную lifecycle
+history. `SUBMISSION_REJECTED`/`CLAIM_REJECTED`/`COMPLETION_REJECTED` отличаются от
+`OPENED_THEN_REVOKED`. Trace с phase=at_failure/at_login_failure относится к отказу;
+phase=after_cleanup — только fallback после teardown. Не считать возврат в Open
+автоматическим разрешённым результатом: после каждого Home нужен явный test login.
+
 ## Отдельный guided lifecycle probe
 
 Run **P6b1 Lifecycle Probe** либо:

@@ -13,7 +13,7 @@ import java.util.concurrent.*
 /** Test-only memory bootstrap. No Activity/View, saved state, files, production provider admission,
  * automatic relogin, real user URI, or password prompt. */
 class P6b1HostModel(app: Application): AndroidViewModel(app) {
-    val coordinator=SessionCoordinator()
+    val coordinator=SessionCoordinator(captureDiagnostics=true)
     val worker=SessionWorker(coordinator)
     private val system=SessionSystemSignals(app,coordinator,worker) { event(it) }
     @Volatile var fixture: SyntheticSession?=null; private set
@@ -38,7 +38,7 @@ class P6b1HostModel(app: Application): AndroidViewModel(app) {
     @Synchronized fun event(value: String) { require(value.matches(Regex("[A-Za-z0-9_:=-]{1,100}"))); if(value=="ACTUAL_SCREEN_OFF") screenOffObserved=true; if(events.size==128) events.removeFirst(); events.addLast(value) }
     @Synchronized fun eventCopy()=events.toList()
     init { setup.execute { val f=SyntheticSession(); fixture=f; coordinator.selectDocument(f.document); ready=true } }
-    fun login(decoy: Boolean) {
+    fun login(decoy: Boolean): Long {
         check(ready)
         val f=fixture!!; val attempt=coordinator.beginUnlock()
         authenticated=null
@@ -49,7 +49,7 @@ class P6b1HostModel(app: Application): AndroidViewModel(app) {
                 override fun local()=f.local(checkNotNull(opened).store)
                 override fun secret()=SecretEncoding.text(if(decoy) SyntheticSession.DECOY else SyntheticSession.MAIN)
             })
-            return
+            return attempt.epoch
         }
         check(coordinator.submitUnlock(attempt))
         // Controlled KDF-result delivery barrier: real credentials/core, not an injected role.
@@ -67,6 +67,7 @@ class P6b1HostModel(app: Application): AndroidViewModel(app) {
                 else { owner.revoke(); owner.release() }
             } catch(e: Throwable) { coordinator.rejectUnlock(attempt); owned?.let { it.revoke(); try { it.release() } catch(clean: Throwable) { e.addSuppressed(clean) } }; lastFailure=SessionWorker.Failure(e.javaClass.name,e.stackTrace.take(12).map { "${it.className}.${it.methodName}:${it.lineNumber}" },e.suppressed.size); event("LOGIN_FAILED") } finally { owned?.let { coordinator.unlockFinished(it) }; coordinator.unlockFailed(attempt); coordinator.unlockWorkFinished(attempt); worker.drainRevocation() }
         }
+        return attempt.epoch
     }
     fun revoke() { coordinator.hardRevoke(SessionCoordinator.Reason.Explicit); worker.drainRevocation() }
     override fun onCleared() {

@@ -9,6 +9,10 @@ import androidx.test.platform.app.InstrumentationRegistry
 import com.fantadrom.copperscroll.p6b1harness.*
 import com.fantadrom.copperscroll.p6aharness.RemoteHarness
 import com.fantadrom.copperscroll.storage.session.*
+import com.fantadrom.copperscroll.sessiontest.RuntimeForegroundFence
+import com.fantadrom.copperscroll.sessiontest.RuntimeSessionDiagnostics
+import org.junit.rules.TestWatcher
+import org.junit.runner.Description
 import com.fantadrom.copperscroll.storage.io.*
 import com.fantadrom.copperscroll.storage.transaction.*
 import com.fantadrom.copperscroll.storage.vfs.*
@@ -26,39 +30,100 @@ class P6b1SessionRuntimeTest {
     private val context=instrumentation.targetContext
     private val current=AtomicReference<P6b1SessionActivity>()
     private val pickerActivity=AtomicReference<P6b1PickerActivity>()
+    private val lifecycle=java.util.IdentityHashMap<Activity,RuntimeForegroundFence>() // UI thread only
+    private var returnAfter: Pair<RuntimeForegroundFence,Long>?=null
+    private var attemptEpoch: Long?=null
+    private fun observe(a: Activity,stage: RuntimeForegroundFence.Stage) {
+        if(a is P6b1SessionActivity || a is P6b1PickerActivity) lifecycle.getOrPut(a) { RuntimeForegroundFence() }.observe(stage)
+    }
     private val callbacks=object: Application.ActivityLifecycleCallbacks {
-        override fun onActivityResumed(a: Activity) { if(a is P6b1SessionActivity) current.set(a) }
-        override fun onActivityCreated(a: Activity,b: Bundle?) { if(a is P6b1PickerActivity) pickerActivity.set(a) }
-        override fun onActivityStarted(a: Activity) {}
-        override fun onActivityPaused(a: Activity) {}
-        override fun onActivityStopped(a: Activity) {}
+        override fun onActivityResumed(a: Activity) {
+            observe(a,RuntimeForegroundFence.Stage.Resumed)
+            if(a is P6b1SessionActivity && a.model.coordinator.ownsWindow(a.signals.window)) current.set(a)
+        }
+        override fun onActivityCreated(a: Activity,b: Bundle?) { observe(a,RuntimeForegroundFence.Stage.Created); if(a is P6b1PickerActivity) pickerActivity.set(a) }
+        override fun onActivityStarted(a: Activity) { observe(a,RuntimeForegroundFence.Stage.Started) }
+        override fun onActivityPaused(a: Activity) { observe(a,RuntimeForegroundFence.Stage.Paused) }
+        override fun onActivityStopped(a: Activity) { observe(a,RuntimeForegroundFence.Stage.Stopped) }
         override fun onActivitySaveInstanceState(a: Activity,b: Bundle) {}
-        override fun onActivityDestroyed(a: Activity) {}
+        override fun onActivityDestroyed(a: Activity) { observe(a,RuntimeForegroundFence.Stage.Destroyed); lifecycle.remove(a) }
     }
     private fun ui(action: ()->Unit)=instrumentation.runOnMainSync(action)
+    private fun safeTrace(phase: String): String {
+        var result="P6B1_SAFE_TRACE; phase=$phase; host=missing"
+        ui { current.get()?.let { a ->
+            val c=a.model.coordinator; val diagnostic=c.diagnostics()
+            result="phase=$phase; activityStage=${lifecycle[a]?.stage}; editorVisible=${a.editor.visibility==View.VISIBLE}; editorEnabled=${a.editor.isEnabled}\n"+
+                RuntimeSessionDiagnostics.render(diagnostic.history,diagnostic.current,a.model.eventCopy(),attemptEpoch)
+        } }
+        return result
+    }
+    private fun failure(code: String): Nothing = throw AssertionError("$code\n${safeTrace("at_failure")}")
+    private fun annotate(error: Throwable,phase: String) {
+        if(error.message?.contains("P6B1_SAFE_TRACE")==true || error.suppressed.any { it.message?.contains("P6B1_SAFE_TRACE")==true }) return
+        try { error.addSuppressed(AssertionError(safeTrace(phase))) } catch(diagnostic: Throwable) { error.addSuppressed(diagnostic) }
+    }
+    @get:Rule val diagnostics=object: TestWatcher() {
+        override fun failed(e: Throwable,description: Description) { annotate(e,"after_cleanup") }
+    }
     private fun await(code: String,condition: ()->Boolean) {
         val end=System.nanoTime()+TimeUnit.SECONDS.toNanos(40)
-        while(!condition()) { current.get()?.model?.let { it.lastFailure ?: it.worker.lastFailure }?.let { throw AssertionError("$code; ${it.type}; ${it.frames.joinToString(";")}") }; check(System.nanoTime()<end) { code }; Thread.sleep(20) }
+        while(!condition()) {
+            current.get()?.model?.let { it.lastFailure ?: it.worker.lastFailure }?.let { failure("$code; worker=${it.type}; frames=${it.frames.joinToString(";")}") }
+            if(System.nanoTime()>=end) failure(code)
+            Thread.sleep(20) // Polling interval; no stabilization delay or automatic login retry.
+        }
     }
+    private fun awaitUi(code: String,condition: ()->Boolean)=await(code) { var ready=false; ui { ready=condition() }; ready }
     private fun host()=current.get() ?: error("HOST_MISSING")
+    private fun foreground(a: P6b1SessionActivity): Boolean {
+        val c=a.model.coordinator; val f=lifecycle[a] ?: return false
+        val fence=returnAfter
+        return c.ownsWindow(a.signals.window) &&
+            (fence==null || f!==fence.first || f.resumedAt>fence.second) && f.foreground(c.snapshot(),a.hasWindowFocus())
+    }
     private fun returnHost() {
         context.startActivity(Intent(context,P6b1SessionActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT))
-        await("HOST_FOREGROUND") { host().hasWindowFocus() }
+        awaitUi("HOST_FOREGROUND") { foreground(host()) }
+        returnAfter=null
     }
     private fun home() {
+        lateinit var front: Activity; lateinit var record: RuntimeForegroundFence; var mark=0L
+        ui {
+            val a=host(); val hostRecord=checkNotNull(lifecycle[a]); returnAfter=hostRecord to hostRecord.resumedAt
+            val picker=pickerActivity.get()
+            front=if(picker!=null && lifecycle[picker]?.stage==RuntimeForegroundFence.Stage.Resumed) picker else a
+            record=checkNotNull(lifecycle[front]); mark=record.sequence
+        }
         android.os.ParcelFileDescriptor.AutoCloseInputStream(instrumentation.uiAutomation.executeShellCommand("input keyevent KEYCODE_HOME")).use { it.readBytes() }
-        await("HOME_REVOKE") { !host().model.coordinator.snapshot().presented }
+        awaitUi("HOME_NOT_DEPARTED") {
+            record.departedAfter(mark,front.hasWindowFocus()) && !host().model.coordinator.snapshot().presented
+        }
     }
     private fun login(decoy: Boolean=false) {
-        await("OWNER_NOT_RELEASED") { host().model.coordinator.snapshot().owner==null && !host().model.coordinator.snapshot().pendingWork && host().hasWindowFocus() }
-        ui { host().model.login(decoy) }
-        await("LOGIN_NOT_PRESENTED") { host().model.authenticated!=null && host().model.coordinator.snapshot().presented && host().editor.visibility==View.VISIBLE }
+        attemptEpoch=null
+        try {
+            awaitUi("LOGIN_NOT_READY") {
+                val a=host(); val state=a.model.coordinator.snapshot()
+                if(!a.model.ready || !foreground(a) || lifecycle[a]?.loginReady(state,a.hasWindowFocus())!=true) false
+                else { attemptEpoch=a.model.login(decoy); true } // Readiness + one attempt in the same UI dispatch.
+            }
+            awaitUi("LOGIN_NOT_PRESENTED") {
+                val a=host(); val c=a.model.coordinator; val diagnostic=c.diagnostics(); val state=diagnostic.current
+                val outcome=RuntimeSessionDiagnostics.outcome(checkNotNull(attemptEpoch),diagnostic.history,state)
+                if(outcome in setOf(RuntimeSessionDiagnostics.Outcome.SUBMISSION_REJECTED,RuntimeSessionDiagnostics.Outcome.CLAIM_REJECTED,
+                    RuntimeSessionDiagnostics.Outcome.COMPLETION_REJECTED,RuntimeSessionDiagnostics.Outcome.FAILED,
+                    RuntimeSessionDiagnostics.Outcome.REVOKED_BEFORE_OPEN,RuntimeSessionDiagnostics.Outcome.OPENED_THEN_REVOKED))
+                    throw AssertionError("LOGIN_NOT_PRESENTED; outcome=$outcome")
+                a.model.authenticated!=null && state.epoch==attemptEpoch && state.presented && a.editor.visibility==View.VISIBLE
+            }
+        } catch(e: Throwable) { annotate(e,"at_login_failure"); throw e }
     }
     @Before fun start() {
         check(context.packageName.endsWith(".p1runtime"))
         (context.applicationContext as Application).registerActivityLifecycleCallbacks(callbacks)
         instrumentation.startActivitySync(Intent(context,P6b1SessionActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK))
-        await("HOST_READY") { current.get()?.model?.ready==true && host().hasWindowFocus() }
+        awaitUi("HOST_READY") { current.get()?.model?.ready==true && foreground(host()) }
     }
     @After fun finish() {
         current.get()?.let { a -> ui { a.model.loginContinue?.countDown(); a.model.ioContinue?.countDown(); a.model.revoke(); a.finish() } }
@@ -78,14 +143,14 @@ class P6b1SessionRuntimeTest {
     }
     @Test fun ownedDialogIsSecureAndHomeRevokes() {
         login(); ui { host().showOwnDialog() }
-        await("DIALOG_NOT_SHOWN") { host().child?.isShowing==true }
+        awaitUi("DIALOG_NOT_SHOWN") { host().child?.isShowing==true }
         ui { assertTrue(host().child!!.window!!.attributes.flags and WindowManager.LayoutParams.FLAG_SECURE!=0); assertTrue(host().model.coordinator.snapshot().presented) }
         home(); returnHost(); ui { assertNull(host().child); assertTrue("EDITOR_NOT_EMPTY",host().editor.text.isEmpty()) }
     }
     @Test fun configurationHandoffRetainsMemoryOwner() {
         login(); ui { host().editor.setText("P6b1 synthetic modified draft") }; val old=host(); val model=old.model; val epoch=model.coordinator.snapshot().epoch; val owner=model.authenticated!!.core.owner
         ui { old.recreateOwned() }
-        await("RECREATION_NOT_COMPLETED") { current.get()!==old && host().hasWindowFocus() && model.coordinator.snapshot().presented && host().editor.visibility==View.VISIBLE }
+        awaitUi("RECREATION_NOT_COMPLETED") { current.get()!==old && host().hasWindowFocus() && model.coordinator.snapshot().presented && host().editor.visibility==View.VISIBLE }
         ui { assertTrue("DRAFT_NOT_RETAINED",host().editor.text.toString()=="P6b1 synthetic modified draft") }
         ui { old.editor.setText("P6b1 stale synthetic callback"); assertTrue("STALE_WINDOW_CHANGED_DRAFT",model.draft=="P6b1 synthetic modified draft") }
         assertEquals("SAVED_BUNDLE_NOT_EMPTY",0,model.savedBundleKeys)
@@ -122,7 +187,7 @@ class P6b1SessionRuntimeTest {
     @Test fun boundPickerRejectsLateWithoutGrant() {
         login(); val model=host().model; val before=context.contentResolver.persistedUriPermissions.size
         ui { host().launchPicker() }
-        await("PICKER_NOT_FOREGROUND") { !host().hasWindowFocus() }
+        awaitUi("PICKER_NOT_FOREGROUND") { !host().hasWindowFocus() }
         // Actual Home while own external Activity is foreground: no token may survive it.
         home()
         await("ACTUAL_PICKER_HOME_NOT_OBSERVED") { !model.coordinator.snapshot().pickerPending }
