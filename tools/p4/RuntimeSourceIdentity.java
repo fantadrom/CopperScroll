@@ -36,7 +36,7 @@ public final class RuntimeSourceIdentity {
     static boolean relevant(String name) {
         if(name.contains("/__pycache__/") || name.endsWith(".pyc")) return false;
         return name.startsWith("app/src/") || name.startsWith("tools/p1/") || name.startsWith("tools/p2/") ||
-            name.startsWith("tools/p3/") || name.startsWith("tools/p4/") || name.startsWith("tools/p5a/") || name.startsWith("tools/p6a/") || name.startsWith("tools/p6a2/") || name.startsWith("tools/p5b/") || name.startsWith("gradle/") || WRAPPER.contains(name) ||
+            name.startsWith("tools/p3/") || name.startsWith("tools/p4/") || name.startsWith("tools/p5a/") || name.startsWith("tools/p6a/") || name.startsWith("tools/p6a2/") || name.startsWith("tools/p6b1/") || name.startsWith("tools/p5b/") || name.startsWith("gradle/") || WRAPPER.contains(name) ||
             Set.of("build.gradle.kts","app/build.gradle.kts","settings.gradle.kts","gradle.properties").contains(name);
     }
     static Properties capture(Path root,String gradle,String jvm,String vendor) throws Exception {
@@ -49,7 +49,7 @@ public final class RuntimeSourceIdentity {
         TreeSet<String> tracked=new TreeSet<>(names(git(root,"ls-files","--cached","-z")));
         TreeSet<String> files=new TreeSet<>(names(git(root,"ls-files","--cached","--others","--exclude-standard","-z")));
         // Ignored sources/assets can still be compiled by AGP; Git cleanliness alone is insufficient.
-        for(String directory:List.of("app/src","tools/p1","tools/p2","tools/p3","tools/p4","tools/p5a","tools/p5b","tools/p6a","tools/p6a2","gradle")) {
+        for(String directory:List.of("app/src","tools/p1","tools/p2","tools/p3","tools/p4","tools/p5a","tools/p5b","tools/p6a","tools/p6a2","tools/p6b1","gradle")) {
             Path dir=root.resolve(directory); if(!Files.isDirectory(dir)) continue;
             try(var paths=Files.walk(dir)) {
                 var iterator=paths.iterator(); int count=0;

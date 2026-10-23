@@ -1,5 +1,10 @@
 # P6a.2: контракты и средства квалификации storage
 
+**Актуальный статус23.10.2026: исследование/инструменты приняты пользователем;
+PR14 слит. Production admission REFUSED, три гарантии UNKNOWN.**
+
+Ниже сохранён исторический журнал22.10.2026; итог23.10 приведён в отдельной записи приёмки.
+
 22.10.2026. База/master `d9891659f8bd6169185c73b52dd9ce99b82da6ea`, merge PR13;
 ancestry `91ff18bcbadbdf3e1ec9a2844c1f09f73741e1d1` подтверждена fetch/API.
 Ветка `codex/copper-scroll-p6a2-provider-qualification`, отдельный Draft PR, без merge.
@@ -572,3 +577,62 @@ rotation/picker invalidation, secure recents/IME/autofill/content capture/clipbo
 SavedState/logs/reveal и backup/OEM transfer, owner quiescence. Это не переносит
 production durability в закрытые gates. P6c UI integration, KDF benchmarks,
 performance limits и независимая security/format review остаются отдельными.
+
+## Пользовательское подтверждение P6a.2 — 23 октября 2026
+
+P6a.2 принят как исследование и инструменты; PR14 слит в master
+`4f55be9ebff9603c727df45bf547ea22bd490f2a`. Это пользовательские Windows-прогоны,
+не исполнение Android агентом. Архивы `p6a2-qualification.zip`,
+`qualification-diagnostics(2).zip`, P6a compact receipt и prepare/resume Terminal
+outputs в этом поручении агенту не предоставлены. Ниже перенесено подтверждение
+пользователя/переданная сверка чата, без заявления собственного чтения архивов.
+В переданном подтверждении согласованы source/bundle/APK/оба mapping hashes,
+method receipts с instrumentation payloads и runner, boot/session transitions,
+run/environment/root matching. Raw P6a XML в последнем комплекте отсутствовали;
+их независимая проверка не заявляется.
+
+```ini
+sourceRevision=1ef434087e5ddfc67631f0d86f8ac7b094c65047
+sourceFingerprint=d05974d01c88a763e9276964ab5da55335fd7e71362e9796b488e356ef5e1c7f
+artifactBundleId=12156ba3d5ac87f202060d168a055aee187a9b880930c0993a68685008b99a97
+targetSha256=9f12a60d0c1e1dc70aafffb126f786736d2120e646127cb1608b93a9ed6937df
+testSha256=e326ea155cc5fa12ccc2fe8bf1b22d9c9fbbbc9a59093de4dd0d3018a140f35c
+gradleVersion=9.6.0
+jvm=JetBrains 25.0.3+-15898627-b508.16
+sourceCodeDirty=false
+sourceDirty=true
+workingTreeDirty=true
+wrapperModified=true
+```
+
+Сборка не полностью clean. Wrapper difference сохранён как provenance,
+нормативная версия репозитория остаётся Gradle9.6.0.
+
+| Проверка | Honor ABR-LX1 Android15 | Emulator Android17 | Идентификатор host/run |
+| --- | --- | --- | --- |
+| P6a runtime |13 PASS, failures/errors/skipped=0 |13 PASS, failures/errors/skipped=0 |runId `086e07f0-43e7-4105-bba9-e12393e90719` |
+| Process |2 completed, dataOutcome/experimentOutcome=PASS |2 completed, dataOutcome/experimentOutcome=PASS |hostRunId `463008dc-acb2-4603-b67a-f8d810743daa` |
+| Reboot |2 completed, dataOutcome/experimentOutcome=PASS; BOOT_COUNT45→46, новая session |2 completed, dataOutcome/experimentOutcome=PASS; BOOT_COUNT2→3, новая session |hostRunId `ca032398-fe2c-47fc-9bb8-1efa3d9bc93a` |
+
+Process device runId: Honor `550160c6-2205-4d6f-b1cf-9044eea8077b`, emulator
+`5c5e82bf-8009-48e4-8d52-16f29907dd88`. Reboot device runId: Honor
+`283dbbcb-e959-45d4-9085-3e9796dd96c9`, emulator
+`689fe1f1-c962-4fb0-af95-363f0540e9f4`.
+
+Honor process: **SAMPLED_MATCHES_ONLY**; Honor reboot:
+**SAME_MODE_UNSTABLE_OBSERVED** — st_dev изменился даже в r→r и rw→rw относительно
+сохранённых baseline, inode совпал. Emulator process/reboot:
+**MODE_DEPENDENT_OBSERVED** — межрежимный st_dev различался, собранные same-mode
+samples совпали. Это результаты наблюдения identity, отдельно от data PASS.
+На обоих identityConclusion=UNCONFIRMED, productionAdmission=REFUSED,
+ExistingWriteDurable/DurableCreateIdentity/DurableLocalState=UNKNOWN;
+power/storage interruption NOT_RUN. Данные пережили наблюдаемые переходы,
+но trusted identity/aliases/locks и power-loss durability не сертифицированы.
+Нет нормализации dev, inode-only/hash-only fallback или нового resolver.
+
+Прежние P1–P5b: **98 completed PASS суммарно на двух устройствах**, source
+`501ed72f4ec6c044101fc748f7a651b0cf30da50`, bundle
+`474ec4eebc79c5351aff2599aef9034f797cd658da69986bdcf159f70771df99`.
+Они не являются новым запуском на1ef4340: промежуточные изменения касались
+qualification harness/host tools/tests/docs, не production storage.
+Исторические failures и agent NOT_RUN выше сохраняются.

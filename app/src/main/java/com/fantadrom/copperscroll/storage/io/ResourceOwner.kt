@@ -23,6 +23,7 @@ class ResourceOwner(store: RandomAccessStore) : AutoCloseable {
     private var epoch = 1L
     private var active: WritePermit? = null
     private var closing: WritePermit? = null
+    private var drainingCheckpoint: WritePermit? = null
     private var stopping = false
     private var unresolved = false
     private var maintenanceHeld = false
@@ -35,7 +36,7 @@ class ResourceOwner(store: RandomAccessStore) : AutoCloseable {
     private var releasing = false
     @Volatile var accessRevoked = false; private set
     init {
-        synchronized(leases) { requireIo(leases.add(store.identity), IoCode.Busy) }
+        synchronized(leases) { requireIo(!leases.containsKey(store.identity),IoCode.Busy); leases[store.identity]=this }
         try { lock = store.acquireExclusive() }
         catch (e: Throwable) { synchronized(leases) { leases.remove(identity) }; throw e }
     }
@@ -62,16 +63,18 @@ class ResourceOwner(store: RandomAccessStore) : AutoCloseable {
         if(removed) resource.close()
     }
     /** closingSave MUST have been accepted before this boundary. Late callbacks cannot mint it. */
-    fun revoke(closingSave: WritePermit? = null) = synchronized(monitor) {
+    fun revoke(closingSave: WritePermit? = null, drainActiveCheckpoint: Boolean = false) = synchronized(monitor) {
         if (closingSave != null) requireIo(closingSave.checkpoint && closingSave.owner === this && closingSave.epoch == epoch &&
             (active === closingSave || !closingSave.used), IoCode.AccessLost)
+        if(drainActiveCheckpoint && !externalRevoke && !maintenanceHeld)
+            drainingCheckpoint=active?.takeIf { it.checkpoint }
         externalRevoke = true
         if(switchAccepted) revokedAfterSwitch = true
         closing = closingSave; accessRevoked = true; epoch++; stopping = true
         monitor.notifyAll()
     }
     fun check(permit: WritePermit) = synchronized(monitor) {
-        requireIo(!released && active === permit && (!accessRevoked || closing === permit), IoCode.AccessLost)
+        requireIo(!released && active === permit && (!accessRevoked || closing === permit || drainingCheckpoint === permit), IoCode.AccessLost)
     }
     /** Only the one preaccepted, not-yet-started checkpoint may enter after revoke.
      * A completed permit cannot publish a cached user result through this capability.
@@ -89,7 +92,7 @@ class ResourceOwner(store: RandomAccessStore) : AutoCloseable {
             permit.used = true; active = permit
         }
         try { return block() }
-        finally { synchronized(monitor) { active = null; monitor.notifyAll() } }
+        finally { synchronized(monitor) { active = null; if(drainingCheckpoint === permit) drainingCheckpoint=null; monitor.notifyAll() } }
     }
     /** Internal read/force reconciliation is allowed after revoke. Its result never opens UI access. */
     fun <T> reconcile(block: () -> T): T {
@@ -169,5 +172,7 @@ class ResourceOwner(store: RandomAccessStore) : AutoCloseable {
         return true
     }
     override fun close() { revoke(); release() }
-    companion object { private val leases = HashSet<StoreIdentity>() }
+    companion object { // Retain the actual owner/FD through Unknown, including loss of a UI ViewModel.
+        // GC is not release/reconciliation; only release() removes this exact lease.
+        private val leases = HashMap<StoreIdentity,ResourceOwner>() }
 }

@@ -30,6 +30,8 @@ public final class VerifyRuntimeApks {
         "Lcom/fantadrom/copperscroll/storage/crypto/ZoneKey;",
         "Lcom/fantadrom/copperscroll/storage/crypto/RecordCrypto;",
         "Lcom/fantadrom/copperscroll/storage/transaction/TransactionCore;",
+        "Lcom/fantadrom/copperscroll/storage/session/SessionCoordinator;", "Lcom/fantadrom/copperscroll/storage/session/SessionAuthentication;",
+        "Lcom/fantadrom/copperscroll/session/android/AndroidSessionSignals;", "Lcom/fantadrom/copperscroll/session/android/SecureSessionPresentation;",
         "Lcom/fantadrom/copperscroll/storage/io/ResourceOwner;", "Lcom/fantadrom/copperscroll/storage/io/FileChannelStore;",
         "Lcom/fantadrom/copperscroll/storage/io/FaultStore;", "Lcom/fantadrom/copperscroll/storage/io/LocalStateCodec;",
         "Lcom/fantadrom/copperscroll/storage/format/ContainerReader;", "Lcom/fantadrom/copperscroll/storage/format/CowCatalogue;",
@@ -49,6 +51,8 @@ public final class VerifyRuntimeApks {
         if(args.length == 3 && args[0].equals("--p6a-isolation")) {
             try(ZipFile release=new ZipFile(args[1]); ZipFile harness=new ZipFile(args[2])) {
                 var real=definitions(release); var test=definitions(harness);
+                P6b1ManifestAudit.check(release,false); P6b1ManifestAudit.check(harness,test.containsKey("Lcom/fantadrom/copperscroll/p6b1harness/P6b1SessionActivity;"));
+                P6b1ManifestAudit.classes(real.keySet(),false);
                 for(String type:List.of("AndroidSafStore","SafStoreFactory","AppPrivateLocalState"))
                     require(real.containsKey("Lcom/fantadrom/copperscroll/storage/android/"+type+";"),"Android adapter missing from ordinary release: "+type);
                 require(real.keySet().stream().noneMatch(n->n.startsWith("Lcom/fantadrom/copperscroll/p6aharness/")),"Test controls/provider/helper leaked into ordinary release");
@@ -80,6 +84,14 @@ public final class VerifyRuntimeApks {
             Map<String, Definition> appDefinitions = definitions(app), testDefinitions = definitions(tests);
             checkHierarchy(appDefinitions); checkHierarchy(testDefinitions);
             Set<String> appClasses = appDefinitions.keySet(), testClasses = testDefinitions.keySet();
+            boolean p6b1=Path.of(args[6]).getFileName().toString().equals("p6b1-runtime");
+            P6b1ManifestAudit.check(app,p6b1); P6b1ManifestAudit.check(tests,false); P6b1ManifestAudit.classes(appClasses,p6b1);
+            if(p6b1) {
+                String suite="Lcom/fantadrom/copperscroll/storage/runtime/P6b1SessionRuntimeTest;";
+                require(testClasses.contains(suite) && !appClasses.contains(suite),"P6b1 suite isolation");
+                for(String method:List.of("secureLoginRolesAndCommands","homeRevokesWithoutAutomaticReentry","ownedDialogIsSecureAndHomeRevokes","configurationHandoffRetainsMemoryOwner","lateCredentialCompletionCannotReopen","finalCardWaitsForIoWithoutDelayingHide","boundPickerRejectsLateWithoutGrant","helperRestartStartsLocked"))
+                    require((testIndex.classes.get(suite).methods.getOrDefault(method+"()V",0)&1)!=0,"P6b1 method missing: "+method);
+            }
             require(appClasses.containsAll(BACKEND), "Processed target is missing backend definitions");
             require(appClasses.stream().noneMatch(name -> name.startsWith("Lcom/fantadrom/copperscroll/storage/runtimechecks/")),
                 "Synthetic crypto test helpers must not ship in production target");
@@ -104,7 +116,7 @@ public final class VerifyRuntimeApks {
                     "namespaceAndLocalStateDurability", "catalogueSplitsAndLimits", "boundedStoreAndConflict"))
                 require((testIndex.classes.get(p3Suite).methods.getOrDefault(method+"()V",0) & 1) != 0,
                     "P3 expected runtime method missing: " + method);
-            boolean p6a=Path.of(args[6]).getFileName().toString().equals("p6a-runtime");
+            boolean p6a=p6b1 || Path.of(args[6]).getFileName().toString().equals("p6a-runtime");
             String p6aSuite="Lcom/fantadrom/copperscroll/storage/runtime/P6aSafRuntimeTest;";
             require(!appClasses.contains(p6aSuite),"P6a suite duplicated in target");
             if(p6a) {

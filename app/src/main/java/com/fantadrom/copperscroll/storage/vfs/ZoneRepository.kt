@@ -133,6 +133,16 @@ class ZoneRepository(val core: TransactionCore) {
             expected=expectedObjectRevision?.let { listOf(ObjectHandle(stamp.zone,id,it)) } ?: emptyList(),now=now,body=bytes,revision=revision)) }
         finally { bytes.fill(0) }
     }
+    /** Worker preparation only; lifecycle reads an already-ready slot, never this codec. */
+    fun prepareFinalCard(id: Bytes,parent: Bytes,draft: CardDraft): FinalCheckpoint {
+        checkFormat(CardCodec.validate(draft.title,draft.body).valid && draft.color in 0..0xffffffffL &&
+            draft.icon.matches(Regex("[a-z][a-z0-9_-]{0,31}")),Failure.ValidationError)
+        val bytes=CardCodec.encode(draft.body)
+        val checkpoint=FinalCardCheckpoint(core,id,parent,draft.title,draft.color,draft.icon,bytes,System.currentTimeMillis())
+        try { core.owner.adopt(checkpoint); return checkpoint }
+        catch(e: Throwable) { checkpoint.close(); throw e }
+        finally { bytes.fill(0) }
+    }
     fun issueMedia(stamp: ZoneStamp,id: Bytes,parent: Bytes,name: String,mime: String,source: BinarySource,
                    now: Long = System.currentTimeMillis()): OperationToken {
         VfsMutation.mediaType(mime)
@@ -175,4 +185,19 @@ object NoteStorageAdapter {
         document.styles.map { NoteStyle(it.start.toLong(),it.end.toLong(),it.style.bold,it.style.italic,it.style.underline,it.style.foreground?.toLong()?.and(0xffffffffL)) })
     fun toEditor(body: NoteBody): NoteDocument = NoteDocument(body.paragraphs.map { Paragraph(it.text,it.checked) },
         body.styles.map { StyledRange(it.startUtf16.toInt(),it.endUtf16.toInt(),TextStyle(it.bold,it.italic,it.underline,it.foregroundArgb?.toInt())) })
+}
+
+private class FinalCardCheckpoint(core: TransactionCore,private val id: Bytes,private val parent: Bytes,
+    title: String,private val color: Long,icon: String,bytes: ByteArray,private val capturedAt: Long) : FinalCheckpoint(core) {
+    private var body: ByteArray?=bytes.clone(); private var title: String?=title; private var icon: String?=icon
+    override fun build(snapshot: ReadSnapshot,view: ZoneView,revision: Long): ZoneMutation {
+        checkFormat(revision < Long.MAX_VALUE,Failure.UnsupportedLimit)
+        val old=view.objects[id]
+        checkFormat(old == null || old.type == 6 && old.parent == parent,Failure.ValidationError)
+        val stamp=ZoneStamp(view.descriptor.zoneId,view.descriptor.sequence,revision)
+        return VfsMutation(stamp,"Card",id,parent,title ?: throw com.fantadrom.copperscroll.storage.io.StoreException(com.fantadrom.copperscroll.storage.io.IoCode.Closed),color,icon,
+            expected=old?.let { listOf(ObjectHandle(stamp.zone,id,it.revision)) } ?: emptyList(),
+            now=capturedAt,body=body ?: throw com.fantadrom.copperscroll.storage.io.StoreException(com.fantadrom.copperscroll.storage.io.IoCode.Closed))
+    }
+    override fun close() { body?.fill(0); body=null; title=null; icon=null }
 }

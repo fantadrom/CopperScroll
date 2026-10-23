@@ -43,7 +43,10 @@ class CardDraftSession(private val repository: ZoneRepository, val id: Bytes, pr
     private val revealed = HashSet<Bytes>()
     private val saves = HashSet<CardSave>()
     init { checkFormat(initial == null || initial.metadata.id == id && initial.metadata.parent == parent,Failure.ValidationError) }
-    @Synchronized fun snapshot(): CardDraft { requireIo(!closed,IoCode.AccessLost); return current!! }
+    @Synchronized fun snapshot(): CardDraft {
+        if(repository.core.owner.accessRevoked) { revealed.clear(); throw StoreException(IoCode.AccessLost) }
+        requireIo(!closed && !repository.core.owner.accessRevoked,IoCode.AccessLost); return current!!
+    }
     private fun validate(d: CardDraft): CardValidation {
         val result = CardCodec.validate(d.title,d.body)
         val metadata = d.color !in 0..0xffffffffL || !d.icon.matches(Regex("[a-z][a-z0-9_-]{0,31}"))
@@ -51,7 +54,7 @@ class CardDraftSession(private val repository: ZoneRepository, val id: Bytes, pr
     }
     @Synchronized fun validation(): CardValidation = validate(snapshot())
     @Synchronized fun edit(title: String, body: CardBody, color: Long = snapshot().color, icon: String = snapshot().icon): CardDraft {
-        requireIo(!closed,IoCode.AccessLost); val old = current!!; checkFormat(old.revision < Long.MAX_VALUE,Failure.UnsupportedLimit)
+        requireIo(!closed && !repository.core.owner.accessRevoked,IoCode.AccessLost); val old = current!!; checkFormat(old.revision < Long.MAX_VALUE,Failure.UnsupportedLimit)
         checkFormat(title.length <= 4096 && icon.length <= 128,Failure.ResourceLimit)
         // Body/field/parameter/value collections were frozen by their constructors.
         val next = CardDraft(title,CardBody(body.fields),old.revision+1,color,icon); current = next
@@ -59,10 +62,10 @@ class CardDraftSession(private val repository: ZoneRepository, val id: Bytes, pr
         revealed.retainAll(next.body.fields.filter { it.type == 3 }.map { it.id }.toSet()); return next
     }
     val dirty: Boolean @Synchronized get() = if(closed) closedRevision > acknowledged else current!!.revision > acknowledged
-    val saved: Boolean @Synchronized get() = hasSaved && !closed && !dirty
+    val saved: Boolean @Synchronized get() = hasSaved && !closed && !repository.core.owner.accessRevoked && !dirty
     /** Must be called BEFORE revoke; a late callback cannot create a new checkpoint. */
     @Synchronized fun prepareSave(lastWhollyValid: Boolean = false): CardSave? {
-        requireIo(!closed,IoCode.AccessLost)
+        requireIo(!closed && !repository.core.owner.accessRevoked,IoCode.AccessLost)
         val d = (if(lastWhollyValid) valid else current?.takeIf { validate(it).valid }) ?: return null
         if(hasSaved && d.revision <= acknowledged) return null
         if(saves.any { it.draftRevision == d.revision }) return saves.single { it.draftRevision == d.revision }
@@ -70,6 +73,12 @@ class CardDraftSession(private val repository: ZoneRepository, val id: Bytes, pr
         val stamp = repository.stamp(); val requestRevision = maxOf(stamp.nextRevision,d.revision)
         val token = repository.issueSaveCard(stamp,id,parent,d.title,d.body,objectRevision,d.color,d.icon,requestRevision)
         return CardSave(token,d.revision,requestRevision,objectRevision).also { saves.add(it) }
+    }
+    /** Call on a worker while Open, then offer the immutable result to SessionCoordinator.
+     * Revoke never enters this monitor or the repository codec/core monitor. */
+    fun prepareFinalCheckpoint(): FinalCheckpoint? {
+        val draft=synchronized(this) { requireIo(!closed && !repository.core.owner.accessRevoked,IoCode.AccessLost); valid }
+        return draft?.let { repository.prepareFinalCard(id,parent,it) }
     }
     fun submit(save: CardSave): WriteOutcome {
         synchronized(this) { checkFormat(save in saves,Failure.ValidationError) }

@@ -9,7 +9,7 @@ format1.1/1.2, review-resolution, prototype P6, test SAF/DUR/LIFE/LEAK/MAINT,
 отчёты P1–P5b и существующий owner/core/copier/coordinator/recovery/local codec.
 
 **Текущий статус: P6a.1 принят по пользовательскому подтверждению 22.10.2026.
-Production allowlist пуста; квалификация P6a.2 и общий P6a открыты.**
+Production allowlist пуста; P6a.2 принят23.10.2026 как исследование/инструменты; общий P6a и production admission открыты.**
 Android агента NOT_RUN ниже относится к собственным историческим сборкам. Пользовательские
 P5b/regression результаты прежней пары отдельно добавлены в
 [p5b-report](p5b-report.md); они не подтверждают новые adapters/APK P6a.
