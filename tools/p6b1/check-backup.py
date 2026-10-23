@@ -8,6 +8,9 @@ import subprocess
 import tempfile
 import re
 import zipfile
+import sys
+profile=sys.argv[1] if len(sys.argv)>1 else "p6b1"
+assert profile in ("p6b1","p6b2")
 
 root=Path(__file__).resolve().parents[2]
 release=root/'app/build/outputs/apk/release/app-release-unsigned.apk'
@@ -40,7 +43,7 @@ def attribute(blob,attribute,value):
             for i in range(count):
                 p=offset+16+start+stride*i
                 if strings[struct.unpack_from('<I',b,p+4)[0]]==attribute:
-                    struct.pack_into('<I',b,p+16,value); return bytes(b)
+                    struct.pack_into('<I',b,p+16,value(strings) if callable(value) else value); return bytes(b)
         offset+=size
     raise AssertionError('application/allowBackup absent')
 
@@ -57,20 +60,21 @@ def resources(apk):
         result[name]=(int(match[1],16),paths[0])
     return result
 
-arguments=(root/'app/build/reports/p6b1-runtime/audit-arguments.txt').read_text().splitlines()
+arguments=(root/f'app/build/reports/{profile}-runtime/audit-arguments.txt').read_text().splitlines()
 baseline=subprocess.run([java,'-cp',classes,'VerifyRuntimeApks',*arguments],capture_output=True,text=True,timeout=120)
 assert baseline.returncode==0,baseline.stdout+baseline.stderr
 test=Path(arguments[1]); hashes.append(hashlib.sha256(test.read_bytes()).hexdigest())
 with tempfile.TemporaryDirectory(prefix='p6b1-backup-') as owned:
     for apk in (release,target,test):
         refs=resources(apk)
-        for change in ('allowBackup','missing_rules','domain','wrong_reference'):
+        for change in ('allowBackup','missing_rules','domain','wrong_reference', *(() if apk==test else ('wrong_agent',))):
             changed=Path(owned)/(apk.stem+'-'+change+'.apk')
             with zipfile.ZipFile(apk) as src,zipfile.ZipFile(changed,'w') as dst:
                 for entry in src.infolist():
                     if change=='missing_rules' and entry.filename==refs['data_extraction_rules'][1]: continue
                     data=src.read(entry)
                     if change=='allowBackup' and entry.filename=='AndroidManifest.xml': data=attribute(data,'allowBackup',1)
+                    if change=='wrong_agent' and entry.filename=='AndroidManifest.xml': data=attribute(data,'backupAgent',lambda pool: next(i for i,s in enumerate(pool) if s.endswith('.MainActivity')))
                     if change=='wrong_reference' and entry.filename=='AndroidManifest.xml': data=attribute(data,'fullBackupContent',refs['data_extraction_rules'][0])
                     if change=='domain' and entry.filename==refs['backup_rules'][1]:
                         # Equal encoded length preserves the AXML pool, exposing an unsupported domain.
@@ -78,10 +82,10 @@ with tempfile.TemporaryDirectory(prefix='p6b1-backup-') as owned:
                         assert updated!=data; data=updated
                     dst.writestr(entry,data)
             if apk==test:
-                args=arguments.copy(); args[1]=str(changed); args[3]=str(Path(owned)/'audit.txt'); args[6]=str(Path(owned)/'p6b1-runtime')
+                args=arguments.copy(); args[1]=str(changed); args[3]=str(Path(owned)/'audit.txt'); args[6]=str(Path(owned)/f'{profile}-runtime')
             else: args=['--p6a-isolation',str(changed if apk==release else release),str(changed if apk==target else target)]
             p=subprocess.run([java,'-cp',classes,'VerifyRuntimeApks',*args],capture_output=True,text=True,timeout=120)
-            expected={'allowBackup':'allowBackup must be false','missing_rules':'Missing AXML:','domain':'Invalid/duplicate backup exclusion','wrong_reference':'Manifest backup reference points to wrong resource'}[change]
+            expected={'allowBackup':'allowBackup must be false','missing_rules':'Missing AXML:','domain':'Invalid/duplicate backup exclusion','wrong_reference':'Manifest backup reference points to wrong resource','wrong_agent':'Refusal backup agent missing from manifest'}[change]
             assert p.returncode!=0 and expected in p.stderr,(change,p.stdout,p.stderr)
 assert hashes==[hashlib.sha256(p.read_bytes()).hexdigest() for p in (release,target,test)]
-print('P6b1 actual AXML backup audit: 12 negative APKs refused; originals unchanged; Android NOT_RUN')
+print('P6b1 actual AXML backup audit: 14 negative APKs refused; originals unchanged; Android NOT_RUN')

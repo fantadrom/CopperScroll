@@ -11,7 +11,7 @@ import sys
 
 root = Path(__file__).resolve().parents[2]
 profile=sys.argv[1] if len(sys.argv)>1 else 'p6a'
-assert profile in ('p6a','p6b1')
+assert profile in ('p6a','p6b1','p6b2')
 release = root / 'app/build/outputs/apk/release/app-release-unsigned.apk'
 harness = root / 'app/build/outputs/apk/p1Release/app-p1Release.apk'
 java = str(Path(os.environ['JAVA_HOME']) / 'bin/java')

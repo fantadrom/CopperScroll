@@ -10,11 +10,18 @@ final class P6b1ManifestAudit {
         require("false".equals(app.attributes.get("allowBackup")),"allowBackup must be false");
         for(String key:List.of("fullBackupContent","dataExtractionRules"))
             require(app.attributes.containsKey(key) && !Set.of("0","false").contains(app.attributes.get(key)),"Missing backup resource: "+key);
+        if(elements.stream().anyMatch(e->e.tag.equals("activity") && e.attributes.getOrDefault("name","").endsWith(".MainActivity"))) {
+            require(!"true".equals(app.attributes.get("debuggable")),"Release must not be debuggable");
+            require(app.attributes.getOrDefault("backupAgent","").endsWith(".backup.RefuseBackupAgent"),"Refusal backup agent missing from manifest");
+        }
         String dump=resources(apk);
         backupResource(apk,app,"fullBackupContent","backup_rules",Set.of("full-backup-content"),dump);
         backupResource(apk,app,"dataExtractionRules","data_extraction_rules",Set.of("cloud-backup","device-transfer"),dump);
         var controls=elements.stream().filter(e->e.attributes.getOrDefault("name","").startsWith("com.fantadrom.copperscroll.p6b1harness.")).toArray(P6aManifestAudit.Element[]::new);
         require(controls.length==(host?2:0),"Lifecycle host manifest isolation/count");
+        var privacy=elements.stream().filter(e->e.attributes.getOrDefault("name","").startsWith("com.fantadrom.copperscroll.p6b2harness.")).toArray(P6aManifestAudit.Element[]::new);
+        require(privacy.length<2 && (host || privacy.length==0),"P6b2 manifest isolation");
+        for(var e:privacy) require(e.tag.equals("activity") && "false".equals(e.attributes.get("exported")),"P6b2 host must be nonexported Activity");
         for(var e:controls) require(e.tag.equals("activity") && "application".equals(e.parent) && "false".equals(e.attributes.get("exported")),"Lifecycle host must be nonexported Activity");
     }
     private static void backupResource(ZipFile apk,P6aManifestAudit.Element app,String attribute,String resourceName,Set<String> parents,String dump) throws Exception {
@@ -72,8 +79,10 @@ final class P6b1ManifestAudit {
         require(seen.values().stream().allMatch(domains::equals),"Incomplete backup domain exclusions");
     }
     static void classes(Set<String> classes,boolean host) {
-        for(String type:List.of("storage/session/SessionCoordinator","storage/session/SessionAuthentication","session/android/AndroidSessionSignals","session/android/SecureSessionPresentation"))
+        for(String type:List.of("storage/session/SessionCoordinator","storage/session/SessionAuthentication","session/android/AndroidSessionSignals","session/android/SecureSessionPresentation","session/ui/UiAccess","session/android/ProtectedEditText","session/android/SessionWindowPolicy"))
             require(classes.contains("Lcom/fantadrom/copperscroll/"+type+";"),"Production session class missing: "+type);
+        require(host || classes.stream().noneMatch(c->c.startsWith("Lcom/fantadrom/copperscroll/p6b2harness/") || c.startsWith("Lcom/fantadrom/copperscroll/privacytest/")),"P6b2 controls leaked into release");
+        if(classes.contains("Lcom/fantadrom/copperscroll/MainActivity;")) require(classes.contains("Lcom/fantadrom/copperscroll/backup/RefuseBackupAgent;"),"Refusal backup agent missing");
         boolean synthetic=classes.stream().anyMatch(c->c.startsWith("Lcom/fantadrom/copperscroll/sessiontest/") || c.startsWith("Lcom/fantadrom/copperscroll/p6b1harness/"));
         require(synthetic==host,"Synthetic lifecycle bootstrap isolation");
         if(host) for(String type:List.of("P6b1SessionActivity","P6b1PickerActivity","P6b1HostModel"))

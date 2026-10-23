@@ -16,7 +16,7 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
-        window.addFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE)
+        com.fantadrom.copperscroll.session.android.SecureSessionPresentation.secure(this)
         super.onCreate(savedInstanceState)
         enableEdgeToEdge(
             statusBarStyle = SystemBarStyle.light(AndroidColor.TRANSPARENT, AndroidColor.TRANSPARENT),

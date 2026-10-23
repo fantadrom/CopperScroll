@@ -185,13 +185,17 @@ allowlist пуст. Seek/probe не подтверждают power-loss.
 signals/presentation port, немедленные revoke/hide и epoch capabilities,
 configuration/picker handoff, final checkpoint/IO-owner/Unknown boundary;
 synthetic opt-in test host и автоматическая suite + отдельный guided lifecycle probe.
-[Отчёт](validation/p6b1-report.md). Android приёмка требует новых пользовательских
-результатов; сборки и model tests её не заменяют. Реальный Workspace engine не подключён.
+[Отчёт](validation/p6b1-report.md). Пользовательская ограниченная приёмка head758ba91 подтверждена23.10.2026: по8 PASS
+на Honor15/emulator17 и guided observations;140 PASS вместе с семью регрессиями.
+Исторические отказы/ограничения сохранены в отчёте; это не полная LEAK/OEM certification. Реальный Workspace engine не подключён.
 
-**P6b.2, последующее отдельное поручение:** полная IME/autofill/content capture/
+**P6b.2, реализация в отдельном Draft PR:** общие production UI guards, IME/autofill/content capture/
 clipboard/accessibility/reveal/share/drag/recents leak матрица, OEM/cloud backup и
 device transfer, ordinary-release runtime. Baseline P6b.1 не закрывает эти условия.
-Не выполнять factory reset личного Honor. Полный нормативный P6b не ослаблен.
+Не выполнять factory reset личного Honor. [P6b.2 report/matrix](validation/p6b2-report.md)
+разделяет exact12 correctness/device, guided observations, primary-process/handoff
+receipts, backup и ordinary-release evidence. Новые Android/OEM результаты пока
+NOT_RUN; полный нормативный P6b не ослаблен, P0 остаются открытыми.
 
 **P6b, вход P6a:** foreground таблица design§6.1: multi-resume/top-resumed/visibility/
 focus, Home/screen-off/own dialogs/rotation/resize/picker. Настроить manifest/XML

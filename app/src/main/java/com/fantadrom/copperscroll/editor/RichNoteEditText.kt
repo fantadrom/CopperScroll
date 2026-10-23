@@ -27,13 +27,15 @@ import com.fantadrom.copperscroll.R
 import kotlin.math.abs
 
 /** Native selection/clipboard/IME, with paragraph metadata and rendered rich text spans. */
-class RichNoteEditText(context: Context) : EditText(context) {
+class RichNoteEditText(context: Context) : com.fantadrom.copperscroll.session.android.ProtectedEditText(context) {
     private var session: NoteSession? = null
     private val managedSpans = mutableListOf<Any>()
     private var touchingTodo: Int? = null
     private var downX = 0f
     private var downY = 0f
     private var restoring = false
+    private var todoActionGeneration = Long.MIN_VALUE
+    private var todoAction = 0
     private val scale = resources.displayMetrics.density
 
     init {
@@ -46,7 +48,7 @@ class RichNoteEditText(context: Context) : EditText(context) {
         inputType = android.text.InputType.TYPE_CLASS_TEXT or
             android.text.InputType.TYPE_TEXT_FLAG_MULTI_LINE or
             android.text.InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
-        imeOptions = EditorInfo.IME_FLAG_NO_EXTRACT_UI or EditorInfo.IME_FLAG_NO_FULLSCREEN
+        imeOptions = EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING or EditorInfo.IME_FLAG_NO_EXTRACT_UI or EditorInfo.IME_FLAG_NO_FULLSCREEN
         isVerticalScrollBarEnabled = false
         isSaveEnabled = false
         contentDescription = context.getString(R.string.note_text)
@@ -54,7 +56,7 @@ class RichNoteEditText(context: Context) : EditText(context) {
         addTextChangedListener(object : TextWatcher {
             override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
             override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
-                if (restoring) return
+                if (restoring || !readable()) return
                 val current = session ?: return
                 val document = current.data.document.replace(
                     start, start + before, s!!.subSequence(start, start + count).toString()
@@ -62,12 +64,13 @@ class RichNoteEditText(context: Context) : EditText(context) {
                 current.update(current.data.copy(document = document))
             }
             override fun afterTextChanged(s: Editable?) {
-                if (!restoring) renderSpans()
+                if (!restoring && readable()) renderSpans()
             }
         })
     }
 
     fun bind(next: NoteSession) {
+        if (session !== next) bindAccess(com.fantadrom.copperscroll.session.ui.UiAccess.demo())
         if (session !== next) {
             val anchor = next.selectionStart
             val focus = next.selectionEnd
@@ -78,7 +81,7 @@ class RichNoteEditText(context: Context) : EditText(context) {
             setSelection(anchor.coerceIn(0, length()), focus.coerceIn(0, length()))
             restoring = false
             renderSpans()
-            post { scrollTo(0, previousScroll) }
+            post { if (session === next && readable()) scrollTo(0, previousScroll) }
         } else {
             renderSpans()
         }
@@ -86,6 +89,7 @@ class RichNoteEditText(context: Context) : EditText(context) {
     }
 
     fun toggleSelectedTodos() {
+        if (!readable()) return
         val current = session ?: return
         val start = selectionStart.coerceAtLeast(0)
         val end = selectionEnd.coerceAtLeast(0)
@@ -126,7 +130,7 @@ class RichNoteEditText(context: Context) : EditText(context) {
 
     override fun onSelectionChanged(selStart: Int, selEnd: Int) {
         super.onSelectionChanged(selStart, selEnd)
-        if (!restoring) session?.let { it.selectionStart = selStart; it.selectionEnd = selEnd }
+        if (!restoring && readable()) session?.let { it.selectionStart = selStart; it.selectionEnd = selEnd }
     }
 
     override fun onScrollChanged(l: Int, t: Int, oldl: Int, oldt: Int) {
@@ -150,6 +154,7 @@ class RichNoteEditText(context: Context) : EditText(context) {
     }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
+        if (!readable()) return false
         if (event.actionMasked == MotionEvent.ACTION_DOWN) {
             touchingTodo = todoAt(event.x, event.y)
             downX = event.x
@@ -174,18 +179,26 @@ class RichNoteEditText(context: Context) : EditText(context) {
 
     override fun onInitializeAccessibilityNodeInfo(info: AccessibilityNodeInfo) {
         super.onInitializeAccessibilityNodeInfo(info)
+        if (!readable()) return
+        if (todoActionGeneration != bindingGeneration()) {
+            todoActionGeneration = bindingGeneration()
+            todoAction = nextTodoAction.updateAndGet { if (it < 0x3effffff) it + 1 else it }
+                .takeIf { it < 0x3effffff } ?: 0 // Exhaustion fails closed, never reuses an old action ID.
+        }
         val current = session ?: return
         val index = current.data.document.paragraphAt(selectionStart.coerceAtLeast(0))
         current.data.document.paragraphs[index].checked?.let { checked ->
+            if (todoAction == 0) return
             info.addAction(AccessibilityNodeInfo.AccessibilityAction(
-                R.id.toggle_current_todo,
+                todoAction,
                 context.getString(if (checked) R.string.mark_incomplete else R.string.mark_complete)
             ))
         }
     }
 
     override fun performAccessibilityAction(action: Int, arguments: Bundle?): Boolean {
-        if (action == R.id.toggle_current_todo) {
+        if (!readable()) return false
+        if (action != 0 && action == todoAction && todoActionGeneration == bindingGeneration()) {
             session?.let {
                 val index = it.data.document.paragraphAt(selectionStart.coerceAtLeast(0))
                 it.update(it.data.copy(document = it.data.document.toggleChecked(index)))
@@ -194,6 +207,20 @@ class RichNoteEditText(context: Context) : EditText(context) {
             return true
         }
         return super.performAccessibilityAction(action, arguments)
+    }
+
+    override fun onDetachedFromWindow() {
+        restoring = true
+        session = null; managedSpans.clear(); touchingTodo = null
+        invalidateAccess()
+        super.onDetachedFromWindow()
+        restoring = false
+    }
+
+    companion object {
+        // Private custom-action namespace, disjoint from Android/app resource IDs. Process-local,
+        // bounded and monotonic: an old accessibility node cannot mutate a rebound editor.
+        private val nextTodoAction = java.util.concurrent.atomic.AtomicInteger(0x3e000000)
     }
 
     private fun dp(value: Int) = (value * scale).toInt()

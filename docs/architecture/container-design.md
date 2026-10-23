@@ -4,7 +4,10 @@
 P1…P5a имеют пользовательские Android runtime receipts. Headless P5b ChangeSecret
 реализован; [новые runtime gates](validation/p5b-report.md) ещё открыты. Правила карточек/совместимости/лимитов
 из расширения имеют приоритет над ограничениями базового reader1.1 ниже.
-Дата: 18 октября 2026. Нормативный формат: [container-format-v1.md](container-format-v1.md).
+Актуализация23.10.2026: P6b.1 принят пользователем в ограниченной матрице;
+[P6b.2 реализация и открытые Android/OEM gates](validation/p6b2-report.md) отдельно.
+Историческая инвентаризация §1 относится к исходному SHA, не текущим возможностям UI.
+Дата базовой спецификации:18 октября2026. Нормативный формат: [container-format-v1.md](container-format-v1.md).
 Проверки: [container-test-plan.md](container-test-plan.md). Задание разработчику:
 [container-prototype-plan.md](container-prototype-plan.md).
 
@@ -327,6 +330,26 @@ Bundle/rememberSaveable, WorkManager Data, logs/crash attachments, plaintext tem
 clipboard/share/process-text/drag/accessibility gates; один isSaveEnabled=false
 не закрывает эти каналы. Перед входом и при revoke FLAG_SECURE=true; после входа
 zone policy, но служебный decoy plaintext не отображается даже в main screenshots.
+
+Реализация P6b.2: `UiAccess` привязывает worker-authenticated SettingsData к текущим
+capability/window; `ProtectedEditText` проверяет эту привязку и generation в input/
+menu callbacks, выдаёт пустые assist/autofill/content-capture structures, маскирует
+password accessibility и исключает неявные экспорты. Stale InputConnection не читает
+и не изменяет следующую сессию; monitoring/inline external content/handwriting и
+text classifier не получают новые данные. Paste отдельно от copy, разрешённая
+копия помечена sensitive на API31+. Очистка уже разрешённого clipboard по таймеру
+не установлена нормой: продуктовый срок остаётся открытым, чужой clipboard не чистится.
+`SessionWindowPolicy` до публикации применяет secure/recents текущей зоны и повторно
+проверяет разрешение внутри очереди UI; старое allow не снимает защиту после revoke.
+RichNoteEditText и native folder input используют эту общую границу; legacy RAM
+demo не является authenticated engine UI. Будущие Card views получают только
+`CardDraftSession.display/copyDisplay` после worker проверки, reveal не восстанавливается
+из Bundle. Полная привязка Workspace/Card/media — P6c.
+`RefuseBackupAgent` дополнительно не экспортирует файлы и отвергает restore, включая
+новый callback API37; allowBackup=false и compiled XML exclusions сохраняются.
+Cross-platform iOS registration без согласованных bundle/team IDs не создаётся.
+Поведение OEM/transport/API31 и оставшиеся ограничения — [P6b.2 matrix](validation/p6b2-report.md);
+реальные Android/OEM проверки не выводятся из наличия флагов/сборки.
 
 ## 8. Копии и общий протокол обслуживания
 

@@ -13,7 +13,7 @@ import com.fantadrom.copperscroll.storage.session.SessionCoordinator
 import com.fantadrom.copperscroll.storage.android.SafOperation
 
 /** Nonexported, opt-in target only. Explicit synthetic login; never connected to WorkspaceScreen. */
-class P6b1SessionActivity: ComponentActivity() {
+open class P6b1SessionActivity: ComponentActivity() {
     val model by lazy { ViewModelProvider(this)[P6b1HostModel::class.java] }
     lateinit var editor: EditText; private set
     lateinit var signals: AndroidSessionSignals; private set
@@ -42,7 +42,7 @@ class P6b1SessionActivity: ComponentActivity() {
         SecureSessionPresentation.secure(this); super.onCreate(null) // no sensitive saved-state restore
         val layout=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL }
         status=TextView(this); layout.addView(status)
-        editor=EditText(this).apply { id=View.NO_ID; isSaveEnabled=false; importantForAutofill=View.IMPORTANT_FOR_AUTOFILL_NO_EXCLUDE_DESCENDANTS; importantForContentCapture=View.IMPORTANT_FOR_CONTENT_CAPTURE_NO_EXCLUDE_DESCENDANTS }
+        editor=ProtectedEditText(this).apply { id=View.NO_ID; isSaveEnabled=false; importantForAutofill=View.IMPORTANT_FOR_AUTOFILL_NO_EXCLUDE_DESCENDANTS; importantForContentCapture=View.IMPORTANT_FOR_CONTENT_CAPTURE_NO_EXCLUDE_DESCENDANTS }
         editor.addTextChangedListener(object: android.text.TextWatcher {
             override fun beforeTextChanged(s: CharSequence?,start: Int,count: Int,after: Int) {}
             override fun onTextChanged(s: CharSequence?,start: Int,before: Int,count: Int) {}
@@ -81,9 +81,13 @@ class P6b1SessionActivity: ComponentActivity() {
         model.transfer=null
         refresh.post(tick)
     }
+    fun addProbeControls(view: View) {
+        val scroll=root.getChildAt(0) as ScrollView
+        (scroll.getChildAt(0) as LinearLayout).addView(view)
+    }
     fun showOwnDialog() {
         val scope=signals.ownWindowOpened(SessionCoordinator.ScopeKind.Modal)
-        val input=EditText(this).apply { setText("P6b1 synthetic dialog"); isSaveEnabled=false; id=View.NO_ID }
+        val input=ProtectedEditText(this).apply { bindAccess(com.fantadrom.copperscroll.session.ui.UiAccess.session(model.coordinator,signals.window,checkNotNull(model.coordinator.currentCapability()))); setText("P6b1 synthetic dialog"); isSaveEnabled=false; id=View.NO_ID }
         val dialog=Dialog(this).apply { setContentView(input); window!!.addFlags(WindowManager.LayoutParams.FLAG_SECURE) }
         presentation.register(dialog)
         dialog.setOnDismissListener { signals.ownWindowClosed(scope); child=null }

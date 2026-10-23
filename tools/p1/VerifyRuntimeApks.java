@@ -48,6 +48,18 @@ public final class VerifyRuntimeApks {
         "Lco/nstant/in/cbor/CborDecoder;", "Lco/nstant/in/cbor/CborEncoder;");
 
     public static void main(String[] args) throws Exception {
+        if(args.length==4 && args[0].equals("--ordinary-release")) {
+            Path apk=Path.of(args[1]),mapping=Path.of(args[2]),report=Path.of(args[3]);
+            Files.deleteIfExists(report); // Never leave an earlier static PASS after a failed audit.
+            try(ZipFile zip=new ZipFile(apk.toFile())) { P6b1ManifestAudit.check(zip,false); P6b1ManifestAudit.classes(definitions(zip).keySet(),false); }
+            var index=DexRuntimeLinkage.apk(apk,false);
+            String id;
+            try(var lines=Files.lines(mapping)) { id=lines.limit(20).filter(l->l.startsWith("# pg_map_id: ")).findFirst().orElseThrow().substring(13).trim(); }
+            require(index.mapIds.contains(id),"Ordinary release mapping does not match actual DEX marker");
+            Files.createDirectories(report.getParent());
+            Files.writeString(report,"variant=ordinaryRelease\nstaticAudit=PASS\nruntime=NOT_RUN\nreleaseSha256="+P1ArtifactDiagnostics.hash(apk)+"\nreleaseMappingSha256="+P1ArtifactDiagnostics.hash(mapping)+"\nreleaseMapId="+id+"\n");
+            System.out.println("Ordinary release actual APK/backup/isolation/mapping audit PASS; runtime NOT_RUN"); return;
+        }
         if(args.length == 3 && args[0].equals("--p6a-isolation")) {
             try(ZipFile release=new ZipFile(args[1]); ZipFile harness=new ZipFile(args[2])) {
                 var real=definitions(release); var test=definitions(harness);
@@ -84,13 +96,21 @@ public final class VerifyRuntimeApks {
             Map<String, Definition> appDefinitions = definitions(app), testDefinitions = definitions(tests);
             checkHierarchy(appDefinitions); checkHierarchy(testDefinitions);
             Set<String> appClasses = appDefinitions.keySet(), testClasses = testDefinitions.keySet();
-            boolean p6b1=Path.of(args[6]).getFileName().toString().equals("p6b1-runtime");
+            boolean p6b2=Path.of(args[6]).getFileName().toString().equals("p6b2-runtime");
+            boolean p6b1=p6b2 || Path.of(args[6]).getFileName().toString().equals("p6b1-runtime");
             P6b1ManifestAudit.check(app,p6b1); P6b1ManifestAudit.check(tests,false); P6b1ManifestAudit.classes(appClasses,p6b1);
             if(p6b1) {
                 String suite="Lcom/fantadrom/copperscroll/storage/runtime/P6b1SessionRuntimeTest;";
                 require(testClasses.contains(suite) && !appClasses.contains(suite),"P6b1 suite isolation");
                 for(String method:List.of("secureLoginRolesAndCommands","homeRevokesWithoutAutomaticReentry","ownedDialogIsSecureAndHomeRevokes","configurationHandoffRetainsMemoryOwner","lateCredentialCompletionCannotReopen","finalCardWaitsForIoWithoutDelayingHide","boundPickerRejectsLateWithoutGrant","helperRestartStartsLocked"))
                     require((testIndex.classes.get(suite).methods.getOrDefault(method+"()V",0)&1)!=0,"P6b1 method missing: "+method);
+            }
+            if(p6b2) {
+                String suite="Lcom/fantadrom/copperscroll/storage/runtime/P6b2PrivacyRuntimeTest;";
+                require(testClasses.contains(suite) && !appClasses.contains(suite),"P6b2 suite isolation");
+                require(appClasses.contains("Lcom/fantadrom/copperscroll/p6b2harness/P6b2SessionActivity;"),"P6b2 target missing");
+                for(String method:List.of("sessionPoliciesFollowAuthenticatedZones","staleConnectionCannotReadOrMutateNextSession","editorInfoAndCredentialQueryBoundary","blockedCopyCutAndIndependentPaste","sensitiveCopyDoesNotEnableOtherExports","richTextUtf16AndStaleCallbacks","emptyAssistAutofillCaptureStructures","hiddenPasswordAccessibilityAndStaleActions","windowPolicyRejectsStaleAllowCallbacks","savedStateAndCanaryAudit","recreationRetiresNativeConnection","maintenanceHidesBeforeServiceWork"))
+                    require((testIndex.classes.get(suite).methods.getOrDefault(method+"()V",0)&1)!=0,"P6b2 method missing: "+method);
             }
             require(appClasses.containsAll(BACKEND), "Processed target is missing backend definitions");
             require(appClasses.stream().noneMatch(name -> name.startsWith("Lcom/fantadrom/copperscroll/storage/runtimechecks/")),
