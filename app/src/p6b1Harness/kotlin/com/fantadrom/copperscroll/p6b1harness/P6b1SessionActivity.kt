@@ -142,14 +142,19 @@ open class P6b1SessionActivity: ComponentActivity() {
     }
 }
 class P6b1PickerActivity: Activity() {
+    lateinit var root: FrameLayout; private set
+    lateinit var scroll: ScrollView; private set
+    lateinit var cancel: Button; private set
     override fun onCreate(state: Bundle?) {
         window.addFlags(WindowManager.LayoutParams.FLAG_SECURE); super.onCreate(null)
         window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
-        val outer=FrameLayout(this).apply {
-            addView(ScrollView(this@P6b1PickerActivity).apply {
-                addView(Button(this@P6b1PickerActivity).apply { text="Cancel synthetic picker"; setOnClickListener { setResult(RESULT_CANCELED); finish() } })
-            })
+        cancel=Button(this).apply { text="Cancel synthetic picker"; setOnClickListener { setResult(RESULT_CANCELED); finish() } }
+        val content=LinearLayout(this).apply {
+            orientation=LinearLayout.VERTICAL
+            addView(cancel,LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT,LinearLayout.LayoutParams.WRAP_CONTENT))
         }
-        setContentView(outer); HarnessWindowInsets.install(window,outer)
+        scroll=ScrollView(this).apply { addView(content,FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT,FrameLayout.LayoutParams.WRAP_CONTENT)) }
+        root=FrameLayout(this).apply { addView(scroll,FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT,FrameLayout.LayoutParams.MATCH_PARENT)) }
+        setContentView(root); HarnessWindowInsets.install(window,root)
     }
 }

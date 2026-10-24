@@ -15,6 +15,7 @@ import java.util.concurrent.TimeUnit
 internal open class P6b2Driver {
     val instrumentation=InstrumentationRegistry.getInstrumentation()
     val context=instrumentation.targetContext
+    @Volatile private var ownedPicker: com.fantadrom.copperscroll.p6b1harness.P6b1PickerActivity?=null
     @Volatile var current: P6b2SessionActivity?=null
     fun host()=checkNotNull(current) { "HOST_MISSING" }
     fun editor()=host().editor as ProtectedEditText
@@ -32,12 +33,12 @@ internal open class P6b2Driver {
     }
     private val callbacks=object: Application.ActivityLifecycleCallbacks {
         override fun onActivityResumed(a: Activity) { if(a is P6b2SessionActivity) current=a }
-        override fun onActivityCreated(a: Activity,b: Bundle?) {}
+        override fun onActivityCreated(a: Activity,b: Bundle?) { if(a is com.fantadrom.copperscroll.p6b1harness.P6b1PickerActivity) ownedPicker=a }
         override fun onActivityStarted(a: Activity) {}
         override fun onActivityPaused(a: Activity) {}
         override fun onActivityStopped(a: Activity) {}
         override fun onActivitySaveInstanceState(a: Activity,b: Bundle) {}
-        override fun onActivityDestroyed(a: Activity) {}
+        override fun onActivityDestroyed(a: Activity) { if(a===ownedPicker) ownedPicker=null }
     }
     fun start() {
         check(context.packageName.endsWith(".p1runtime"))
@@ -45,9 +46,26 @@ internal open class P6b2Driver {
         instrumentation.startActivitySync(Intent(context,P6b2SessionActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK))
         await("HOST_FOREGROUND") { current?.let { it.model.ready && it.model.coordinator.snapshot().foreground.ready && it.hasWindowFocus() }==true }
     }
+    fun closeOwnedWindows(waitForForeground: Boolean=true) {
+        ui {
+            current?.child?.dismiss()
+            ownedPicker?.let { it.setResult(Activity.RESULT_CANCELED); it.finish() }
+        }
+        await("OWNED_WINDOWS_NOT_CLOSED") {
+            ownedPicker==null && current?.child==null && (!waitForForeground || current?.let {
+                it.hasWindowFocus() && it.model.coordinator.snapshot().foreground.ready
+            }==true)
+        }
+    }
     fun finish() {
-        current?.let { a -> ui { a.model.revoke(); a.finish() } }
-        (context.applicationContext as Application).unregisterActivityLifecycleCallbacks(callbacks)
+        var primary: Throwable?=null
+        fun cleanup(action: ()->Unit) {
+            try { action() } catch(failure: Throwable) { if(primary==null) primary=failure else primary!!.addSuppressed(failure) }
+        }
+        cleanup { closeOwnedWindows(false) }
+        cleanup { current?.let { a -> ui { a.model.revoke(); a.finish() } } }
+        cleanup { (context.applicationContext as Application).unregisterActivityLifecycleCallbacks(callbacks) }
+        primary?.let { throw it }
     }
     fun login(decoy: Boolean=false) {
         var epoch: Long?=null

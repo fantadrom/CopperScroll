@@ -57,5 +57,26 @@ left/right reserve system bars/cutout, existing decor consumption is subtracted.
 IME overlap is measured after adjustResize to avoid applying it twice. Geometry
 unit checks cover consumed insets and IME; actual IME, Honor corner/cutout visibility
 and both device orientations still need the guided observations. This does not
-change coordinator rules or qualify storage. The previous Honor handoff failure
-remains OPEN independently of the editor repair.
+change coordinator rules or qualify storage. The user reports that the repeated stage-2 handoff passed (24 October chat);
+the former Honor handoff failure is historical, not a current OPEN condition.
+The supplied runtime ZIP contains automatic-suite evidence, not a handoff receipt.
+
+The follow-up to 16c1d3d synchronizes insets without a deferred padding post and
+waits for two stable pre-draw samples of the root and descendant layout/scroll.
+The picker uses explicit WRAP_CONTENT controls, checks the entire button after
+scrolling and injects a real tap at its measured centre, and cleanup closes only test-owned picker/dialog windows before restoring
+orientation. Primary failures retain cleanup errors as suppressed.
+
+Gesture clipping is converted from root-view to screen coordinates, including
+window offset and internal editor scrolling. The requested line is exposed before
+coordinates are sampled. The real DOWN/UP injection and selected-word assertions
+remain mandatory; no direct handler call substitutes for the gesture.
+
+Sensitive-copy probes use fresh synthetic values and exactly one production write/
+one read. Production refuses export unless its outgoing clip still has IS_SENSITIVE.
+`P6B2_SAFE_CLIPBOARD` records booleans only: successful pre-write verification,
+item/payload/neutral-label match, key presence/value after read, foreground,
+extras, known-host-label/overlay and timestamp-window indicators. It logs no
+clipboard text/hash/label/URI. Replaced/missing items and lost sensitive flags all
+fail. Host echo is a possible independent cause, never an assumed PASS or an
+automatic reason to disable synchronization. No automatic clipboard re-copy/retry.

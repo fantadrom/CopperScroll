@@ -49,6 +49,13 @@ HTML: `app/build/reports/androidTests/connected/p1Release/`;
 ошибка: `app/build/reports/p6b2-runtime/p1-diagnostics.zip`.
 Build failure до runtime: последний UUID в `app/build/reports/p6b2-build-attempts/`.
 Оба mappings и их SHA256 связаны с APK. Не применять mapping другого APK.
+При clipboard-отказе в XML/logcat будет `P6B2_SAFE_CLIPBOARD` с безопасными boolean
+признаками: `preWriteSensitiveVerified`, `textMatches`, `labelMatches`, наличие/значение
+sensitive-флага после чтения и признаки известного host clipboard/overlay. Текст,
+хэши и фактические labels не выводятся. `CLIPBOARD_ITEM_REPLACED` отличается от
+`CLIPBOARD_SENSITIVE_FLAG_LOST`; оба исхода — FAIL. Не копировать ничего вручную
+во время automatic suite. Связь с синхронизацией host clipboard пока гипотеза;
+команда не меняет её настройки и не повторяет запись ради PASS.
 
 ## Guided privacy observations (отдельный результат)
 
@@ -137,9 +144,10 @@ KEYCODE_SLEEP, ждёт реального системного observation, в�
 самостоятельно посреди этого controller. Поля home/screenoff требуют
 OBSERVED_ACTUAL_EVENT_AND_RECREATION_LOCKED; любой неизвестный исход — FAIL с evidence.
 
-**Предыдущий пользовательский отказ handoff на Honor остаётся OPEN.** Исправление
-long-press и safe insets его не закрывает; для закрытия нужен отдельный успешный
-handoff receipt с диагностикой. Новый privacy PASS также не закрывает эту проблему.
+**Повтор этапа2, handoff, прошёл успешно по сообщению пользователя24 октября2026.**
+Прежний отказ Honor сохранён как история, не как текущий OPEN. Источник — сообщение
+в чате; в присланном `p6b2-runtime.zip` находятся automatic-suite XML, отдельного
+handoff receipt в нём нет. Это подтверждение не заменяет automatic/privacy прогон.
 
 Граница намеренно узкая: между beginHandoff и вызовом recreate, а не доказанный
 момент физического rotation/resize внутри OEM relaunch. Та последняя ветвь остаётся

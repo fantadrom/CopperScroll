@@ -75,11 +75,9 @@ class P6b2PrivacyRuntimeTest {
     }
     @Test fun sensitiveCopyDoesNotEnableOtherExports() {
         d.login(); d.ui {
-            val e=d.editor(); e.bindAccess(d.lease(SettingsData(copyBlocked=false))); e.setText("synthetic explicit copy"); e.setSelection(0,e.length())
-            assertTrue(e.onTextContextMenuItem(android.R.id.copy))
-            val clip=d.context.getSystemService(ClipboardManager::class.java).primaryClip!!
-            assertTrue(clip.description.extras!!.getBoolean("android.content.extra.IS_SENSITIVE"))
-            assertTrue("SECRET_LABEL",clip.description.label.toString()=="Copper Scroll")
+            val e=d.editor(); val expected=uniqueSyntheticCopy()
+            e.bindAccess(d.lease(SettingsData(copyBlocked=false))); e.setText(expected); e.setSelection(0,e.length())
+            d.sensitiveCopy(e,expected)
             assertFalse(e.onTextContextMenuItem(android.R.id.shareText)); assertFalse(e.onTextContextMenuItem(android.R.id.textAssist))
             assertFalse(e.performAccessibilityAction(0x01010000,null))
             assertFalse(e.performAccessibilityAction(AccessibilityNodeInfo.ACTION_COPY,null))
@@ -210,11 +208,9 @@ class P6b2PrivacyRuntimeTest {
         d.longPress(e,2); selected("replacement")
         d.ui { e.bindAccess(d.lease(SettingsData(copyBlocked=false))) }
         d.longPress(e,Int.MAX_VALUE); selected("🔑")
-        d.ui {
-            assertTrue(e.onTextContextMenuItem(android.R.id.copy))
-            val clip=d.context.getSystemService(ClipboardManager::class.java).primaryClip!!
-            assertTrue(clip.description.extras!!.getBoolean("android.content.extra.IS_SENSITIVE"))
-        }
+        val copiedWord="copy"+java.util.UUID.randomUUID().toString().replace("-","")
+        prepare(copiedWord); d.longPress(e,Int.MAX_VALUE); selected(copiedWord)
+        d.ui { d.sensitiveCopy(e,copiedWord) }
         prepare(""); d.longPress(e,0); selected("")
         prepare("first line\nsecond word\nlast 🔑")
         d.longPress(e,14); selected("second")
@@ -306,16 +302,16 @@ class P6b2PrivacyRuntimeTest {
                 val monitor=d.instrumentation.addMonitor(com.fantadrom.copperscroll.p6b1harness.P6b1PickerActivity::class.java.name,null,false)
                 try {
                     d.ui { d.host().launchPicker() }
-                    val picker=checkNotNull(d.instrumentation.waitForMonitorWithTimeout(monitor,40000)) { "PICKER_MISSING" }
-                    d.await("PICKER_LAYOUT") { picker.hasWindowFocus() && picker.window.decorView.width>0 && !picker.window.decorView.isLayoutRequested }
+                    val picker=checkNotNull(d.instrumentation.waitForMonitorWithTimeout(monitor,40000)) { "PICKER_MISSING" } as com.fantadrom.copperscroll.p6b1harness.P6b1PickerActivity
+                    d.drawnViewport(picker.window,picker.root,"PICKER_LAYOUT") { picker.hasWindowFocus() }
+                    d.ui { picker.cancel.requestRectangleOnScreen(android.graphics.Rect(0,0,picker.cancel.width,picker.cancel.height),true) }
+                    d.drawnViewport(picker.window,picker.root,"PICKER_SCROLLED_LAYOUT")
                     d.ui {
-                        val outer=picker.findViewById<ViewGroup>(android.R.id.content).getChildAt(0)
-                        geometry(outer,picker.window)
-                        val scroll=(outer as ViewGroup).getChildAt(0) as android.widget.ScrollView
-                        val button=scroll.getChildAt(0); val visible=android.graphics.Rect()
-                        assertTrue("PICKER_CANCEL_NOT_REACHABLE",button.getGlobalVisibleRect(visible) && visible.height()==button.height)
-                        assertTrue(button.performClick())
+                        geometry(picker.root,picker.window)
+                        assertTrue("PICKER_CANCEL_NOT_REACHABLE; ${geometryCode(picker.cancel)}",fullyReachable(picker.cancel))
+                        assertTrue(picker.cancel.isEnabled); assertTrue(picker.cancel.isClickable)
                     }
+                    d.tapReachable(picker.cancel)
                     d.await("PICKER_RETURN_FOREGROUND") { d.host().hasWindowFocus() && d.host().model.coordinator.snapshot().foreground.ready && !d.host().model.coordinator.snapshot().pendingWork }
                 } finally { d.instrumentation.removeMonitor(monitor) }
                 // No open session is carried through the physical rotation; no change to handoff rules.
@@ -323,6 +319,8 @@ class P6b2PrivacyRuntimeTest {
         } catch(failure: Throwable) { primary=failure; throw failure }
         finally {
             try {
+                // Close the test-owned foreground windows BEFORE waiting for host/orientation.
+                d.closeOwnedWindows()
                 d.ui { d.host().model.revoke() }
                 orient(if(originalConfiguration==android.content.res.Configuration.ORIENTATION_PORTRAIT) android.content.pm.ActivityInfo.SCREEN_ORIENTATION_PORTRAIT else android.content.pm.ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE)
                 d.ui { d.host().requestedOrientation=original }

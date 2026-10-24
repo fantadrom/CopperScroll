@@ -138,6 +138,9 @@ open class ProtectedEditText(context: Context): EditText(context) {
             val clip=ClipData.newPlainText("Copper Scroll",text.subSequence(from,to))
             clip.description.extras=PersistableBundle().apply { putBoolean("android.content.extra.IS_SENSITIVE",true) } // literal works on API31/32 too
             if(authority?.mayCopy()!=true) return false
+            // Fail closed before export if framework construction did not retain the policy flag.
+            // A true COPY result therefore proves the actual outgoing clip passed this check.
+            if(clip.description.extras?.getBoolean("android.content.extra.IS_SENSITIVE")!=true) return false
             context.getSystemService(ClipboardManager::class.java).setPrimaryClip(clip)
             if(id==android.R.id.cut && readable()) text.delete(from,to)
             return true

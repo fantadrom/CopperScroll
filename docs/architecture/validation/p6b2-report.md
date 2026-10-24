@@ -2,9 +2,13 @@
 
 Обновление24 октября2026: исправление long-press и safe viewport в том же Draft
 PR№16. Актуальный обязательный набор — **14 методов на устройство**. Новые Android
-прогоны агента NOT_RUN; **предыдущий отказ handoff на Honor остаётся OPEN**.
-Диагностика, причина, изменения и результаты повторных проверок приведены в
-[обновлении ниже](#исправление-долгого-нажатия-и-отступов--24-октября-2026).
+прогоны агента NOT_RUN. **Пользователь24 октября сообщил об успешном повторе
+этапа2, handoff; прежний отказ Honor больше не текущий OPEN.** Источник — сообщение
+в чате; присланный runtime ZIP не содержит отдельного handoff receipt.
+Актуальная диагностика16c1d3d и доработки — в
+[последнем обновлении](#отказы-runtime16c1d3d-и-повторное-исправление--24-октября-2026);
+[предыдущее исправление](#исправление-долгого-нажатия-и-отступов--24-октября-2026)
+сохранено исторически.
 Ниже сохранена история исходной реализации23 октября, её результаты не подменяют
 проверку исправления на устройствах.
 
@@ -208,7 +212,7 @@ PASS model/host — только указанная ветвь; ни одна с
 | LIFE-05 P1 remembered-folder/cursor | repository existing + rich offsets | PASS existing VFS/model | NOT_RUN regression + rich suite | N/A no engine folder | NOT_RUN | P6c login starts folder not editor |
 | LIFE-06 P0 noncancellable IO | owner unchanged, UI lease separate | PASS existing blocking-owner tests | NOT_RUN P6b.1/P6a regression | N/A no engine IO | NOT_RUN | no grace-timeout release claim |
 | LIFE-07 P0 multi-resume/shade | existing actual foreground facts | PASS existing model | NOT_RUN new code; previous guided limited | NOT_RUN demo baseline | NOT_RUN | actual multiwindow/service observations |
-| LIFE-08 P1 handoff interruptions | existing coordinator + opt-in host barrier | PASS model Home/handoff | NOT_RUN narrow actual-event probe | N/A no authenticated handoff | NOT_CONFIRMED physical rotation+Home/Power | новый checkpoint не доказывает всё OEM relaunch |
+| LIFE-08 P1 handoff interruptions | existing coordinator + opt-in host barrier | PASS model Home/handoff | USER_CONFIRMED_PASS: повтор этапа2 по сообщению24 октября; agent NOT_RUN | N/A no authenticated handoff | NOT_CONFIRMED physical rotation+Home/Power | новый checkpoint не доказывает всё OEM relaunch |
 | LIFE-09 P0 final snapshot/late result | existing ClosingSave+worker+UI denial | PASS existing P3/P6b.1 tests | NOT_RUN8/13 regressions | N/A no durable ACK | NOT_RUN | P6c async ACK integration |
 | LEAK-01 P0 state/logs/temps | no saved snapshots, no raw-key exporter | PASS scanner encodings + negative control | NOT_RUN actual canary scan | NOT_RUN limited public UI; no private read | NOT_RUN | crash payloads/other future surfaces остаются открыты |
 | LEAK-02 P0 IME/stale connection | ProtectedEditText generation proxy | PASS authority tests; native code requires Android | NOT_RUN direct actual connection + guided active IME | NOT_RUN native demo | NOT_RUN | no claim all OEM keyboards/history erased |
@@ -553,8 +557,202 @@ errors/skipped и BUILD SUCCESSFUL. Второй: отдельные польз�
 принимает. Требуемая P6b.1 регрессия по-прежнему8/device, остальные регрессии
 и ограничения p1Release/обычного release, API31 и storage REFUSED сохранены.
 
-**Отдельная открытая проблема: предыдущий пользовательский handoff FAIL на Honor.**
-Этот архив касается long-press/privacy, нового успешного handoff receipt не
-содержит. Причина того отказа и его исправление не объявлены установленными;
-long-press/viewport PASS не закроет его. P6b.2/P6b целиком не приняты; PR№16
-сохраняется Draft, без merge.
+**Исторический статус при подготовке16c1d3d:** отказ handoff Honor ещё считался
+открытым. Последующим сообщением24 октября пользователь подтвердил успешный
+повтор этапа2, handoff. Текущий статус этого scoped условия — USER_CONFIRMED_PASS;
+прежний FAIL остаётся историей, не текущим OPEN. Источник — сообщение пользователя,
+не самостоятельный прогон агента; отдельный handoff receipt в новом automatic-suite
+архиве отсутствует. P6b.2/P6b целиком не приняты; PR№16 остаётся Draft, без merge.
+
+
+## Отказы runtime16c1d3d и повторное исправление — 24 октября 2026
+
+Перед работой fetch/API подтвердили актуальный head
+**16c1d3d2074da29daa4d883fdc72c7b049442d5b**, ту же ветку и PR№16 OPEN/DRAFT.
+Рабочее дерево было чистым. Для среды вновь прочитан managed cloud skill и проверены
+политика/готовность; toolchain, dependencies, R8/scope/keep rules, Startup/lifecycle,
+14 exact methods и строгие fresh/source/APK/result gates не изменялись.
+
+### Диагностика пользователя
+
+Прочитан `p6b2-runtime.zip`, SHA256
+`1cf4187f29d5eacf4d43cb1f3b19d6b53a116048dd0e38efca7f17f6035ff350`.
+Fresh runId `cc105a68-8d56-418e-81cb-6b48d99d5502`, artifactBundleId
+`1030e149443e6118540aadd020c5645a24706899ea6198e252d51c7083de3ec3`.
+Windows/Gradle9.6.0/JetBrains25.0.3, sourceCodeDirty=false, wrapperModified=true;
+нормативный wrapper репозитория не меняется. Это пользовательский запуск.
+
+| Устройство | Всего | PASS | failures | errors/skipped |
+| --- | --- | --- | --- | --- |
+| Honor ABR-LX1 / API35 |14 |12 |2 |0/0 |
+| Virtual_Pixel_6 / API37 |14 |11 |3 |0/0 |
+
+Оба devices: `harnessInsetsRemainOutsideScrollAcrossOrientations` и
+`longPressAfterReplacementKeepsUtf16AndSessionBoundary`; дополнительно AVD —
+`sensitiveCopyDoesNotEnableOtherExports`. Gate правильно отказал с Nonzero runtime
+failures, acceptance NOT_CONFIRMED. Это не zero-test и не runtime PASS.
+
+Mapping extracted из того же ZIP: targetMapId
+`8f4e34faa7fc68eee1d40a36b256f5a17ce4226945d2f9bc3ae2e9dba1738ff8`,
+testMapId **6ad9485ae9026a9eb66db44c9d1ae959dca1c65b2404b8195e7a4d9bc95cbf14**,
+testMappingSha256
+`da4d6d96f45dc2e649f54f992892dac278a3840de66c5e439ec5cc9adfc7c8f8`.
+Retrace выполнен именно этим test mapping через R8 из builder9.4.1:
+
+- picker assertion — `P6b2PrivacyRuntimeTest.kt:316`;
+- cleanup — orient:260 и finally:327, suppressed ORIENTATION_FOREGROUND;
+- gesture preflight — `P6b2EditorGestures.kt:49`, до отправки DOWN;
+- clipboard flag — `P6b2PrivacyRuntimeTest.kt:81`.
+
+### Picker и layout
+
+Старый тест ждал decor, не контейнер/descendants. Installer ещё мог отложенным
+post изменить padding и запросить следующий layout. В архиве нет измерений
+button/root на момент assertion: только по нему нельзя доказать постоянное
+обрезание кнопки либо точную фазу layout. Обе слабости устранены: применение
+insets синхронно в callback, затем повторяется по layout при доступных размерах;
+`settled` сверяет фактический padding с ожидаемым и проверяет layout всех
+участвующих descendants. Test ждёт два последовательных pre-draw с одинаковыми
+geometry/scroll и без pending layout. Это условие, не фиксированная задержка.
+
+Picker содержит явный WRAP_CONTENT vertical content и button внутри ScrollView.
+После готового layout тест немедленно прокручивает всю кнопку в viewport, вновь
+ждёт pre-draw и требует полной ширины/высоты, видимости/enabled/clickable. Затем
+реальный DOWN/UP в измеренном центре должен закрыть picker и вернуть host foreground.
+40dp/system/cutout insets остаются вне scroll content; при реальном clipping
+проверка всё равно FAIL с размерами и видимым прямоугольником без содержимого.
+
+Driver отслеживает только test-owned picker, закрывает его с RESULT_CANCELED
+и собственный Dialog **до** ожидания host foreground и восстановления orientation.
+Сохраняется первичное исключение; ошибки cleanup — suppressed. Ошибка в pre-draw
+callback передаётся как исходный JUnit failure, не превращается в process crash.
+SessionCoordinator/admission/revoke/handoff semantics не менялись.
+
+### Настоящее долгое нажатие
+
+Установлен дефект стенда: screen point из getLocationOnScreen сравнивался с
+getGlobalVisibleRect, возвращающим координаты root View. Для Dialog с ненулевым
+window origin это разные системы ([контракт getGlobalVisibleRect](https://developer.android.com/reference/android/view/View#getGlobalVisibleRect(android.graphics.Rect))). Теперь clipping явно переводится в screen
+space с учётом globalOffset и внутреннего scroll редактора. Перед gesture ждутся
+focus/layout, требуемая строка раскрывается immediate requestRectangleOnScreen,
+затем ожидаются стабильные pre-draw/scroll и видимая целевая точка. Координаты
+снимаются после этого; getOffsetForPosition дополнительно подтверждает именно
+нужное слово. DOWN/UP остаются настоящими UiAutomation injections, ожидается
+actual long-click callback и проверяется выбранное слово. Ни clamp к чужой строке,
+ни прямой вызов обработчика не заменяют жест. Insets не уменьшаются.
+
+### Clipboard — независимое исследование и строгая диагностика
+
+Исходный XML доказывает false при чтении sensitive-флага; он **не доказывает**, что
+прочитан тот же clip, и не содержит наблюдения флага до IPC. Application clipboard
+code находится вне R8 optimization; literal key корректен для API31+, создание
+PersistableBundle в исходнике соответствует платформенному контракту. Поэтому
+причина не приписана R8, геометрии либо обновлению зависимостей.
+
+В AVD logcat два `Clipboard overlay suppressed` перед отказом. Read-only просмотр
+AOSP [EmulatorClipboardMonitor](https://github.com/aosp-mirror/platform_frameworks_base/blob/master/services/core/java/com/android/server/clipboard/EmulatorClipboardMonitor.java)
+и ClipboardService показывает возможный host echo:
+входящий host текст создаёт новый clip с label `host clipboard` и только extra
+SUPPRESS_CLIPBOARD_OVERLAY. Это **гипотеза для данного запуска**, не доказательство:
+архив не содержит label/item identity/флага outgoing clip. AOSP master не выдаётся
+за точную исходную сборку API37 устройства.
+
+Production COPY теперь fail-closed проверяет IS_SENSITIVE непосредственно перед
+setPrimaryClip. True return доказывает успешную проверку outgoing clip; если
+конструирование утратило flag, экспорт не выполняется. Нет диагностического UI,
+plaintext logging, новых dependencies либо второго backend.
+
+Runtime test использует новый уникальный synthetic payload для каждой записи и
+делает ровно одну запись/одно чтение. В RAM сравниваются item/text/neutral label,
+наличие и значение sensitive extra после read; наружу выводятся **только boolean**
+через P6B2_SAFE_CLIPBOARD: copyReturned/preWriteSensitiveVerified, present/singleItem,
+textMatches/labelMatches, sensitivePresent/sensitive, foreground, extrasPresent,
+known-host-label/overlay и попадание timestamp в окно записи/чтения. Нет raw text,
+actual labels, URI, хэшей либо clipboard history. Timestamp — только диагностика;
+проверки самого item и sensitive flag обязательны. Неудачный COPY не читает старый
+clipboard. Missing/replaced clip, lost/absent flag и foreground loss всегда FAIL;
+повторной записи/retry для получения PASS нет, host synchronization не отключается.
+
+Это исправляет недостаточность исходной проверки и обеспечивает наблюдение до/
+после IPC без ослабления sensitive policy. **Конкретная причина потери флага в
+пользовательском AVD остаётся неустановленной до нового runtime evidence**:
+ни system echo, ни реальная потеря metadata того же clip не объявлены устранёнными
+по одному успешному build. Следующий отказ будет разделён на
+CLIPBOARD_ITEM_REPLACED / CLIPBOARD_SENSITIVE_FLAG_LOST, а не немой assertion.
+
+### Статус handoff
+
+Пользователь в текущем сообщении подтвердил: **этап2, handoff, при повторе прошёл
+успешно**. Scoped статус — USER_CONFIRMED_PASS. Источник — сообщение пользователя
+24 октября2026; в p6b2-runtime.zip только automatic suite, отдельного handoff receipt
+нет. Агент не выдаёт это за свой запуск или полное подтверждение physical OEM
+rotation interruption. Предыдущий Honor FAIL сохраняется исторически, не текущим OPEN.
+
+### Проверка и передача этого исправления
+
+Здесь нет Android runner: /dev/kvm/system-images/emulator отсутствуют;
+`adb devices -l` не запускается из-за read-only /home/agent/.android. Automatic
+14/device и guided privacy на исправлении — NOT_RUN агентом; новые результаты
+Honor/AVD должен предоставить пользователь. Компиляция не считается runtime PASS.
+Фактические проверки завершены:
+
+| Проверка | Результат |
+| --- | --- |
+| JVM |220 tests/35 suites,0 failures/errors/skipped;10 новых regression checks для координат и clipboard evidence |
+| Host gates | P6b.2 results69, обязательный source92, P6b.1 results24, diagnostics20 — PASS |
+| lintDebug / lintRelease / lintP1Release |0 errors/fatal;16/18/46 warnings, без изменения toolchain или blanket suppressions |
+| debug / ordinary release / debugAndroidTest | BUILD SUCCESSFUL9m, включая полный JVM run |
+| processed p1Release target/test и audits | BUILD SUCCESSFUL4m15s; source unchanged PASS, mappings/APK hashes проверены |
+| Actual APK | backend/crypto target-only,0 duplicates, hierarchy/package access и instrumentation linkage PASS;3950 ICU resources/goldens PASS |
+| Backup / isolation / privacy negatives |14+7+2 =23 изменённые копии отвергнуты; originals unchanged |
+| Automatic/privacy entry points | dry-run BUILD SUCCESSFUL12s, Android tasks SKIPPED по смыслу dry-run; это не runtime |
+| Новый Honor15 / AVD17 automatic/privacy | NOT_RUN агентом |
+
+Команды агента:
+
+```bash
+bash gradlew :app:testDebugUnitTest :app:testP6b2RuntimeResults :app:testP4SourceIdentity :app:testP6b1RuntimeResults :app:testP6aRuntimeDiagnostics :app:lintDebug :app:lintRelease :app:assembleDebug :app:assembleRelease :app:assembleDebugAndroidTest --offline --no-daemon --no-parallel --max-workers=2 --console=plain
+bash gradlew -Pp6b2ReleaseRuntime=true :app:testP6b2RuntimeResults :app:testP4SourceIdentity :app:verifyP1ReleaseApks :app:verifyP4BuildIdentity :app:verifyP6aIsolation :app:verifyP6b2OrdinaryRelease :app:lintP1Release --offline --no-daemon --no-parallel --max-workers=2 --no-configuration-cache --console=plain
+python3 tools/p6b1/check-backup.py p6b2
+python3 tools/p6a/check-isolation.py p6b2
+python3 tools/p6b2/check-privacy-apks.py
+bash gradlew -Pp6b2ReleaseRuntime=true :app:p6b2ReleaseRuntimeCheck :app:p6b2PrivacyProbe --dry-run --offline --no-daemon --no-parallel --max-workers=2 --no-configuration-cache --console=plain
+```
+
+Новые pre-commit артефакты: HEAD16c1d3d с изменёнными исходниками, не clean build
+будущего SHA. Оба mappings/configurations/API rules сохранены в
+`app/build/reports/p6b2-runtime/artifacts/<artifactBundleId>/` и diagnostic ZIP.
+Следующий Windows run свяжет фактический SHA и свои артефакты заново.
+
+```properties
+sourceRevision=16c1d3d2074da29daa4d883fdc72c7b049442d5b
+sourceFingerprint=046afc46c72b2f3cfaed54d8dda7d9abc3cdc476411b4dfbc631ab9848ef0749
+sourceCodeDirty=true
+sourceDirty=true
+workingTreeDirty=true
+wrapperModified=false
+gradleVersion=9.6.0
+gradleJvmRuntime=25.0.4.1+1-LTS-5
+artifactBundleId=8a90a0552dbb64f38ea9d1f633fef674d4be856dc3fcdd7b4b8bb090342f0726
+targetSha256=1f2157938fab2721e2d302f7800695d4aac038b06f6edc6d3b41836c2e436da0
+testSha256=658c9fae5004b8373261cb0470a9b5df6e396d975900e44f4eb4ee56fba5405a
+targetMapId=870b7db1e6d5553abb66d9fa81704a11ac2dc803e23edf79835c98ef30700003
+testMapId=9830088fecb2b7042a40a4b413763161b417e836ab0037fb1cb734c6a32abfbd
+targetMappingSha256=a2098bf724343051b26a8c6787836517027c97a385144ee9819ba240dc4ed355
+testMappingSha256=eae3095a3a1c53cddd24a2a605b83b28a4697834378a27919cfedd72219cbb3e
+ordinaryReleaseSha256=acd1baa37a818b06e6b03192f342995ee0a0261aef27f6bac0675d455dec9e9a
+AndroidRuntime=NOT_RUN
+```
+
+Единые Windows-команды и набор14 методов сохранены:
+
+```powershell
+.\gradlew.bat -Pp6b2ReleaseRuntime=true :app:p6b2ReleaseRuntimeCheck --no-configuration-cache --console=plain
+.\gradlew.bat -Pp6b2ReleaseRuntime=true :app:p6b2PrivacyProbe --no-configuration-cache --console=plain
+```
+
+Нужны свежие14 PASS/device на Honor15 и AVD17,0 failures/errors/skipped, затем
+отдельные privacy observations обоих устройств/ориентаций/IME/dialog. При новом
+отказе прислать runtime diagnostics ZIP и Terminal; безопасные geometry/clipboard
+признаки попадут в XML/logcat. PR№16 сохраняется Draft без merge; P6b.2/P6b целиком
+по-прежнему не приняты, storage admission REFUSED и границы обычного release сохранены.
