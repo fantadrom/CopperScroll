@@ -9,7 +9,7 @@ P4 extension, ADR-001, отчёты P1–P6a.2 и существующие core/
 legacy UI/Android/source/APK gates. Применён cloud-environment-runtime skill для
 среды/сетевых ограничений; приложение не получило сетевых возможностей.
 
-**P6b.1 пока не принят. Android агента NOT_RUN. Production storage admission
+**Актуальный статус: P6b.1 принят пользователем 23.10.2026 на head758ba91; PR15 слит. Android агента NOT_RUN. Production storage admission
 REFUSED; allowlist пуста, ExistingWriteDurable/DurableCreateIdentity/
 DurableLocalState UNKNOWN.** Storage-путь не изменён; app-private canonical
 working container не вводился. [Пользовательская инструкция](../../../tools/p6b1/android-runtime-windows.md).
@@ -159,7 +159,7 @@ MAINT-01/05/08 и LEAK-04 — с real-role, stale-login и обоими AcceptSw
 [compiled APK audit](../../../tools/p1/P6b1ManifestAudit.java) и
 [мутации actual APK](../../../tools/p6b1/check-backup.py).
 
-## Матрица нормативных subcases
+## Историческая матрица нормативных subcases (до приёмки758ba91)
 
 PASS ниже относится только к исполненным JVM/host subcases после завершения проверок;
 Android/manual всё ещё NOT_RUN. Полный ID одним subcase не закрывается.
@@ -462,3 +462,83 @@ commit содержит эти проверенные исходники. Пол
 Android у агента NOT_RUN: предоставленного runner нет. Новый runtime необходимо
 проверить пользователем на обоих устройствах; прежний Honor PASS относится к21f,
 первоначальная причина второго отказа ограничена отсутствовавшей диагностикой.
+
+
+## Пользовательская приёмка P6b.1 — 23 октября 2026
+
+Источник: подтверждение пользователя и provenance в ТЗ P6b.2. Исходные архивы этих
+успешных прогонов в этом поручении не переданы, агент их не открывал. Следующие
+значения переданы пользователем; это не собственные Android-прогоны агента.
+Исторический reports2.zip и его отказы на21f0b57 выше сохранены.
+
+Общая provenance:
+
+```properties
+sourceRevision=758ba918b10f94d45763c50b6c35e51f78ec699c
+sourceFingerprint=8696676ce2dcfc7d6bf44dc6559a1045d96118c6fae78933da77e99fe83d49d3
+gradleVersion=9.6.0
+gradleJvmRuntime=25.0.3+-15898627-b508.16
+gradleJvmVendor=JetBrains s.r.o.
+sourceCodeDirty=false
+sourceDirty=true
+workingTreeDirty=true
+wrapperModified=true
+wrapperPropertiesSha256=92a95cec0ec5140cfd6148c544d8f10ba54729ffdc792803b4bc8ad4e840b00f
+wrapperJarSha256=76805e32c009c0cf0dd5d206bddc9fb22ea42e84db904b764f3047de095493f3
+```
+
+Устройства: Honor ABR-LX1 Android15 (`ANXGUT4C12002978`) и Virtual_Pixel_6 Android17 (`emulator-5554`).
+
+| Пользовательский прогон | runId / hostRunId | Bundle | Результат на каждом устройстве |
+| --- | --- | --- | --- |
+| P6b.1 automatic | `89afd762-eabd-4b79-9a52-3fe630cbb2e0` | `1a8c701295dde7c37885d64443b8267de2c84f39747a5f954434e65171d97da9` | 8 PASS, failures/errors/skipped=0; runner exit=0 |
+| P6b.1 manual | `adf038ce-68c5-4c19-9821-3db0cf087517` | тот же `1a8c…` | USER_OBSERVATIONS_COLLECTED, пять групп, actualScreenOffObserved=true |
+| P6a | `b30bb690-d3e8-42e4-b8e5-0dd253d30607` | `7b34d11cad478bc8c9ca4141c906c798850aca4d2ea3f02579bb64a745d8c937` | 13 PASS |
+| P1 | `e1515bb2-2df3-4aff-b7d8-98bbe9d5816a` | `74dfb3ac3874a21a8ecda6c811c18b1a040146b0f4d7bca8a167ab0aa1275075` | 7 PASS |
+| P2 | `1cf6b4a8-7357-4a24-9c84-92322055ba78` | тот же `74df…` | 8 PASS |
+| P3 | `0d659a04-d6df-4a11-9edb-973f04eec073` | тот же `74df…` | 8 PASS |
+| P4 | `7e5cdd9a-b106-4397-bce8-712f89977ba2` | тот же `74df…` | 10 PASS |
+| P5a | `c314d703-6dbe-4fbb-aa81-1bae4fd992f4` | тот же `74df…` | 8 PASS |
+| P5b | `6a442a21-a510-4169-aebd-323243d05a8f` | тот же `74df…` | 8 PASS |
+
+Все семь регрессий: failures/errors/skipped=0. Всего 124 completed PASS регрессий на двух устройствах, плюс 16 P6b.1 = **140 PASS**, отдельно от двух guided runs. P1–P3 compact receipts не содержат sourceRevision; их связь с этим кодом устанавливается совпадающими hashes APK/bundle с P4/P5a/P5b, где source поля присутствуют. Отсутствующие поля не представлены как прочитанные из P1–P3.
+
+APK SHA256:
+
+| Bundle | Target SHA256 | Test SHA256 |
+| --- | --- | --- |
+| `1a8c…` | `a857053060799b88ae641aa4c7281a94828a8d022009c8629c2d4276310ed964` | `bdb3dba0d50c1f423af8b1f702680a49042944215e43cc939dcb3ab5404700f0` |
+| `7b34…` | `c6cc806124bdcbef8a309a899e3df94f00faa88bda4c0f3dd385e2425b57a8e7` | `09eb9ba68fb58b87f05b07d3d58ccb6101cb2714541b390b4e4ba6d1b4f09069` |
+| `74df…` | `ae94e8c377e709a9c8d4da9d5eae29cbe38792f509fc1f8f87f463e824d6a78c` | `220207fc07b0b80b76d44e82e77536236fdb4b9fcdad4dc92def622bb0272cab` |
+
+Manual deviceRunId: Honor `95bcacfe-466d-4be5-af50-f45b4288aa88`; emulator `b29371ae-b396-42c5-a321-fc074fe12ae6`. Пользователь сообщил об ожидаемом поведении без визуальных отклонений во всех выполненных сценариях.
+
+Ограничения принятых наблюдений:
+
+- Power во время поворота на Honor: по наблюдению пользователя корректно; точный порядок внутри handoff из compact receipt не доказан.
+- Home во время поворота на Honor не дал наблюдаемого перехода; причина неизвестна, это NOT_CONFIRMED.
+- На эмуляторе Power и Home именно во время поворота не удалось выполнить; NOT_RUN.
+- Это не полная автоматическая LIFE/LEAK/OEM certification. Флаг `rotation_resize` не доказывает каждое сочетание событий.
+- Промежуточный неуспех emulator на этой версии сопровождался native SIGABRT RenderThread/system_server, `MaxTextureSize has not been initialized yet.`; после восстановления эмулятора та же APK-пара прошла. Не записывать это как доказанное падение target/криптографии.
+
+
+Приёмка относится к указанным APK и ограниченной P6b.1 матрице; новые P6b.2 APK
+не наследуют PASS. [Следующий отчёт](p6b2-report.md) отдельно ведёт открытые P0.
+
+
+Актуальные статусы принятого P6b.1 (пределы прежней матрицы сохранены):
+
+| IDs | Пользовательское evidence758ba91 | Что не закрыто |
+| --- | --- | --- |
+| LIFE-01/06/09 | automatic Home/late-result/реальный synthetic Card Closing и owner quiescence PASS; P6a/P3/P5 регрессии PASS | все физические syscall/power-loss/OEM сочетания не следуют из этого |
+| LIFE-02 | actual recreate/memory ViewModel/epoch/Bundle-empty PASS; guided rotation/resize observations | все keyboard/selection/OEM relaunch ветви отдельно |
+| LIFE-03/04 | controlled bound picker cancel/late result PASS | настоящий DocumentsUI и основной UI-process death — P6b.2/P6c |
+| LIFE-05 | P4 VFS/settings/cursor regression PASS | authenticated Workspace integration отсутствует |
+| LIFE-07 | пять групп guided observations, включая multiwindow/shade/IME; отклонений пользователь не видел | не полная автоматическая platform/OEM сертификация |
+| LIFE-08 | own dialog/recreate PASS; manual actualScreenOffObserved=true на обоих | Honor Home-during-rotation NOT_CONFIRMED; emulator Home/Power-during-rotation NOT_RUN |
+| LEAK-01/02 | baseline Bundle/FLAG_SECURE assertions PASS, guided visual observations отдельно | полные IME/clipboard/capture/accessibility/temps/recents каналы — P6b.2 |
+| LEAK-03 | static exclusions и negative audits PASS | system backup/restore/transport/OEM runtime открыт P0 |
+| LEAK-04 | real main/decoy login и coordinator command gates PASS | полный service plaintext/reveal/media/screenshot leak audit открыт |
+| MAINT-05/06/08/09 | P5a/P5b/P6a regressions PASS и прежние model/host checks | полный Android UI switch/recovery/keys cleanup/OEM coverage не заявляется |
+
+Это закрывает ограниченные условия приёмки P6b.1, не весь нормативный LIFE/LEAK/P6b.

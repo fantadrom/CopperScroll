@@ -34,16 +34,17 @@ abstract class GenerateP1RuntimeApi : JavaExec() {
 val p2KdfBenchmark = providers.gradleProperty("p2KdfBenchmark").orElse("false").get().toBooleanStrict()
 val p2ReleaseRuntime = providers.gradleProperty("p2ReleaseRuntime").orElse("false").get().toBooleanStrict()
 val p3ReleaseRuntime = providers.gradleProperty("p3ReleaseRuntime").orElse("false").get().toBooleanStrict()
+val p6b2ReleaseRuntime = providers.gradleProperty("p6b2ReleaseRuntime").orElse("false").get().toBooleanStrict()
 val p6b1ReleaseRuntime = providers.gradleProperty("p6b1ReleaseRuntime").orElse("false").get().toBooleanStrict()
 val p6aReleaseRuntime = providers.gradleProperty("p6aReleaseRuntime").orElse("false").get().toBooleanStrict()
 val p5bReleaseRuntime = providers.gradleProperty("p5bReleaseRuntime").orElse("false").get().toBooleanStrict()
 val p5aReleaseRuntime = providers.gradleProperty("p5aReleaseRuntime").orElse("false").get().toBooleanStrict()
 val p4ReleaseRuntime = providers.gradleProperty("p4ReleaseRuntime").orElse("false").get().toBooleanStrict()
 val p1RuntimeRequested = providers.gradleProperty("p1ReleaseRuntime").orElse("false").get().toBooleanStrict()
-check(listOf(p1RuntimeRequested,p2ReleaseRuntime,p2KdfBenchmark,p3ReleaseRuntime,p4ReleaseRuntime,p5aReleaseRuntime,p5bReleaseRuntime,p6aReleaseRuntime,p6b1ReleaseRuntime).count { it } <= 1) { "Select one correctness suite OR explicit benchmark" }
-val p1ReleaseRuntime = p1RuntimeRequested || p2ReleaseRuntime || p2KdfBenchmark || p3ReleaseRuntime || p4ReleaseRuntime || p5aReleaseRuntime || p5bReleaseRuntime || p6aReleaseRuntime || p6b1ReleaseRuntime
-val cryptoRuntimeProfile = if(p6b1ReleaseRuntime) "p6b1" else if(p6aReleaseRuntime) "p6a" else if(p5bReleaseRuntime) "p5b" else if(p5aReleaseRuntime) "p5a" else if(p4ReleaseRuntime) "p4" else if(p3ReleaseRuntime) "p3" else if (p2KdfBenchmark) "p2-benchmark" else if (p2ReleaseRuntime) "p2" else null
-val runtimeReports = if(p6b1ReleaseRuntime) "p6b1-runtime" else if(p6aReleaseRuntime) "p6a-runtime" else if(p5bReleaseRuntime) "p5b-runtime" else if(p5aReleaseRuntime) "p5a-runtime" else if(p4ReleaseRuntime) "p4-runtime" else if(p3ReleaseRuntime) "p3-runtime" else if (p2KdfBenchmark) "p2-benchmark" else if (p2ReleaseRuntime) "p2-runtime" else "p1-runtime"
+check(listOf(p1RuntimeRequested,p2ReleaseRuntime,p2KdfBenchmark,p3ReleaseRuntime,p4ReleaseRuntime,p5aReleaseRuntime,p5bReleaseRuntime,p6aReleaseRuntime,p6b1ReleaseRuntime,p6b2ReleaseRuntime).count { it } <= 1) { "Select one correctness suite OR explicit benchmark" }
+val p1ReleaseRuntime = p1RuntimeRequested || p2ReleaseRuntime || p2KdfBenchmark || p3ReleaseRuntime || p4ReleaseRuntime || p5aReleaseRuntime || p5bReleaseRuntime || p6aReleaseRuntime || p6b1ReleaseRuntime || p6b2ReleaseRuntime
+val cryptoRuntimeProfile = if(p6b2ReleaseRuntime) "p6b2" else if(p6b1ReleaseRuntime) "p6b1" else if(p6aReleaseRuntime) "p6a" else if(p5bReleaseRuntime) "p5b" else if(p5aReleaseRuntime) "p5a" else if(p4ReleaseRuntime) "p4" else if(p3ReleaseRuntime) "p3" else if (p2KdfBenchmark) "p2-benchmark" else if (p2ReleaseRuntime) "p2" else null
+val runtimeReports = if(p6b2ReleaseRuntime) "p6b2-runtime" else if(p6b1ReleaseRuntime) "p6b1-runtime" else if(p6aReleaseRuntime) "p6a-runtime" else if(p5bReleaseRuntime) "p5b-runtime" else if(p5aReleaseRuntime) "p5a-runtime" else if(p4ReleaseRuntime) "p4-runtime" else if(p3ReleaseRuntime) "p3-runtime" else if (p2KdfBenchmark) "p2-benchmark" else if (p2ReleaseRuntime) "p2-runtime" else "p1-runtime"
 
 android {
     namespace = "com.fantadrom.copperscroll"
@@ -62,7 +63,7 @@ android {
         testInstrumentationRunnerArguments["p1ExpectedVariant"] = if (p1ReleaseRuntime) "p1Release" else "debug"
         if (p1ReleaseRuntime) {
             testInstrumentationRunnerArguments["class"] = "com.fantadrom.copperscroll.storage.runtime." +
-                if(p6b1ReleaseRuntime) "P6b1SessionRuntimeTest" else if(p6aReleaseRuntime) "P6aSafRuntimeTest" else if(p5bReleaseRuntime) "P5bChangeSecretRuntimeTest" else if(p5aReleaseRuntime) "P5aMaintenanceRuntimeTest" else if(p4ReleaseRuntime) "P4VfsCardRuntimeTest" else if(p3ReleaseRuntime) "P3TransactionRuntimeTest" else if (p2KdfBenchmark) "P2KdfBenchmark" else if (p2ReleaseRuntime) "P2CryptoRuntimeTest" else "P1BackendRuntimeTest"
+                if(p6b2ReleaseRuntime) "P6b2PrivacyRuntimeTest" else if(p6b1ReleaseRuntime) "P6b1SessionRuntimeTest" else if(p6aReleaseRuntime) "P6aSafRuntimeTest" else if(p5bReleaseRuntime) "P5bChangeSecretRuntimeTest" else if(p5aReleaseRuntime) "P5aMaintenanceRuntimeTest" else if(p4ReleaseRuntime) "P4VfsCardRuntimeTest" else if(p3ReleaseRuntime) "P3TransactionRuntimeTest" else if (p2KdfBenchmark) "P2KdfBenchmark" else if (p2ReleaseRuntime) "P2CryptoRuntimeTest" else "P1BackendRuntimeTest"
         }
         if (p2KdfBenchmark) {
             for ((key, fallback) in mapOf("p2BenchmarkMemoryKiB" to "16384", "p2BenchmarkIterations" to "2",
@@ -103,20 +104,26 @@ android {
     sourceSets {
         getByName("debug").kotlin.directories.add("src/productionPolicy/kotlin")
         getByName("release").kotlin.directories.add("src/productionPolicy/kotlin")
-        if(!p6aReleaseRuntime && !p6b1ReleaseRuntime) getByName("p1Release").kotlin.directories.add("src/productionPolicy/kotlin")
-        if(p6aReleaseRuntime || p6b1ReleaseRuntime) {
+        if(!p6aReleaseRuntime && !p6b1ReleaseRuntime && !p6b2ReleaseRuntime) getByName("p1Release").kotlin.directories.add("src/productionPolicy/kotlin")
+        if(p6aReleaseRuntime || p6b1ReleaseRuntime || p6b2ReleaseRuntime) {
             getByName("androidTest").kotlin.directories.add("src/p6aAndroidTest/kotlin")
             getByName("androidTest").java.directories.add("src/p6aAndroidTest/java")
             getByName("androidTest").manifest.srcFile("src/p6aAndroidTest/AndroidManifest.xml")
             getByName("androidTest").assets.directories.add("src/p6aAndroidTest/assets")
             getByName("p1Release").kotlin.directories.add("src/p6aHarness/kotlin")
             getByName("p1Release").kotlin.directories.add("src/p6aModel/kotlin")
-            getByName("p1Release").manifest.srcFile(if(p6b1ReleaseRuntime) "src/p6b1Harness/AndroidManifest.xml" else "src/p6aHarness/AndroidManifest.xml")
-            if(p6b1ReleaseRuntime) {
+            getByName("p1Release").manifest.srcFile(if(p6b2ReleaseRuntime) "src/p6b2Harness/AndroidManifest.xml" else if(p6b1ReleaseRuntime) "src/p6b1Harness/AndroidManifest.xml" else "src/p6aHarness/AndroidManifest.xml")
+            if(p6b1ReleaseRuntime || p6b2ReleaseRuntime) {
                 getByName("p1Release").kotlin.directories.addAll(listOf("src/p6b1Harness/kotlin","src/p6b1Model/kotlin"))
                 getByName("androidTest").kotlin.directories.add("src/p6b1AndroidTest/kotlin")
             }
         }
+        if(p6b2ReleaseRuntime) {
+            getByName("p1Release").kotlin.directories.addAll(listOf("src/p6b2Harness/kotlin","src/p6b2Model/kotlin"))
+            getByName("androidTest").kotlin.directories.add("src/p6b2AndroidTest/kotlin")
+            getByName("androidTest").java.directories.add("src/p6b2AndroidTest/java")
+        }
+        getByName("test").kotlin.directories.add("src/p6b2Model/kotlin")
         getByName("test").kotlin.directories.add("src/testShared/kotlin")
         getByName("test").kotlin.directories.add("src/p6aModel/kotlin")
         getByName("test").kotlin.directories.add("src/p6b1Model/kotlin")
@@ -165,7 +172,7 @@ val compileP1ResultVerifier = tasks.register<JavaCompile>("compileP1ResultVerifi
         rootProject.file("tools/p2/VerifyP2RuntimeResultsTest.java"), rootProject.file("tools/p3/VerifyP3RuntimeResultsTest.java"),
         rootProject.file("tools/p4/RuntimeSourceIdentity.java"),rootProject.file("tools/p4/VerifyP4RuntimeResultsTest.java"),
         rootProject.file("tools/p4/RuntimeSourceIdentityTest.java"),rootProject.file("tools/p5a/VerifyP5aRuntimeResultsTest.java"),rootProject.file("tools/p5b/VerifyP5bRuntimeResultsTest.java"),rootProject.file("tools/p6a/VerifyP6aRuntimeResultsTest.java"),rootProject.file("tools/p6a/ProviderProbeController.java"),
-        rootProject.file("tools/p6b1/VerifyP6b1RuntimeResultsTest.java"),rootProject.file("tools/p6b1/LifecycleProbeController.java"),rootProject.file("tools/p6a2/QualificationLedger.java"),rootProject.file("tools/p6a2/QualificationController.java"),rootProject.file("tools/p6a2/QualificationLedgerTest.java"))
+        rootProject.file("tools/p6b2/VerifyP6b2RuntimeResultsTest.java"),rootProject.file("tools/p6b2/PrivacyProbeController.java"),rootProject.file("tools/p6b1/VerifyP6b1RuntimeResultsTest.java"),rootProject.file("tools/p6b1/LifecycleProbeController.java"),rootProject.file("tools/p6a2/QualificationLedger.java"),rootProject.file("tools/p6a2/QualificationController.java"),rootProject.file("tools/p6a2/QualificationLedgerTest.java"))
     classpath = p1ResultProtocol
     destinationDirectory.set(layout.buildDirectory.dir("p1-result-verifier/classes"))
     options.release.set(11)
@@ -248,7 +255,7 @@ tasks.named("check") { dependsOn(testP6a2Qualification) }
 
 if (p1ReleaseRuntime) {
     val p4IdentityFile = layout.buildDirectory.file("reports/$runtimeReports/build-identity.properties")
-    val captureP4BuildIdentity = if(p4ReleaseRuntime || p5aReleaseRuntime || p5bReleaseRuntime || p6aReleaseRuntime || p6b1ReleaseRuntime) tasks.register<JavaExec>("captureP4BuildIdentity") {
+    val captureP4BuildIdentity = if(p4ReleaseRuntime || p5aReleaseRuntime || p5bReleaseRuntime || p6aReleaseRuntime || p6b1ReleaseRuntime || p6b2ReleaseRuntime) tasks.register<JavaExec>("captureP4BuildIdentity") {
         dependsOn(compileP1ResultVerifier)
         classpath = files(compileP1ResultVerifier.flatMap { it.destinationDirectory },p1ResultProtocol)
         mainClass.set("RuntimeSourceIdentity")
@@ -333,7 +340,7 @@ if (p1ReleaseRuntime) {
                 .map { jar.parentFile.resolve("optional/$it") }.filter { it.isFile }.map { it.absolutePath }
         })
     }
-    val verifyP4BuildIdentity = if(p4ReleaseRuntime || p5aReleaseRuntime || p5bReleaseRuntime || p6aReleaseRuntime || p6b1ReleaseRuntime) tasks.register<JavaExec>("verifyP4BuildIdentity") {
+    val verifyP4BuildIdentity = if(p4ReleaseRuntime || p5aReleaseRuntime || p5bReleaseRuntime || p6aReleaseRuntime || p6b1ReleaseRuntime || p6b2ReleaseRuntime) tasks.register<JavaExec>("verifyP4BuildIdentity") {
         dependsOn(verifyP1ReleaseApks,checkNotNull(captureP4BuildIdentity))
         classpath = files(compileP1ResultVerifier.flatMap { it.destinationDirectory },p1ResultProtocol)
         mainClass.set("RuntimeSourceIdentity")
@@ -344,16 +351,17 @@ if (p1ReleaseRuntime) {
         dependsOn(verifyP1ReleaseApks, testP1RuntimeResults)
         if (cryptoRuntimeProfile != null) dependsOn(testP2RuntimeResults)
         if (p3ReleaseRuntime) dependsOn(testP3RuntimeResults)
-        if (p4ReleaseRuntime || p5aReleaseRuntime || p5bReleaseRuntime || p6aReleaseRuntime || p6b1ReleaseRuntime) dependsOn(testP4RuntimeResults,testP4SourceIdentity,checkNotNull(verifyP4BuildIdentity))
-        if (p5aReleaseRuntime || p5bReleaseRuntime || p6aReleaseRuntime || p6b1ReleaseRuntime) dependsOn(testP5aRuntimeResults)
-        if (p5bReleaseRuntime || p6aReleaseRuntime || p6b1ReleaseRuntime) dependsOn(testP5bRuntimeResults)
-        if (p6aReleaseRuntime || p6b1ReleaseRuntime) dependsOn(testP6aRuntimeResults,testP6aRuntimeDiagnostics, "verifyP6aIsolation")
+        if (p4ReleaseRuntime || p5aReleaseRuntime || p5bReleaseRuntime || p6aReleaseRuntime || p6b1ReleaseRuntime || p6b2ReleaseRuntime) dependsOn(testP4RuntimeResults,testP4SourceIdentity,checkNotNull(verifyP4BuildIdentity))
+        if (p5aReleaseRuntime || p5bReleaseRuntime || p6aReleaseRuntime || p6b1ReleaseRuntime || p6b2ReleaseRuntime) dependsOn(testP5aRuntimeResults)
+        if (p5bReleaseRuntime || p6aReleaseRuntime || p6b1ReleaseRuntime || p6b2ReleaseRuntime) dependsOn(testP5bRuntimeResults)
+        if (p6aReleaseRuntime || p6b1ReleaseRuntime || p6b2ReleaseRuntime) dependsOn(testP6aRuntimeResults,testP6aRuntimeDiagnostics, "verifyP6aIsolation")
         classpath = files(compileP1ResultVerifier.flatMap { it.destinationDirectory }, p1ResultProtocol)
         mainClass.set("VerifyRuntimeResults")
         args("prepare", layout.buildDirectory.get().asFile.absolutePath,
             androidComponents.sdkComponents.adb.get().asFile.absolutePath)
         if (cryptoRuntimeProfile != null) args(cryptoRuntimeProfile)
     }
+    if(p6b2ReleaseRuntime) prepareP1RuntimeRun.configure { dependsOn("testP6b2RuntimeResults") }
     if(p6b1ReleaseRuntime) prepareP1RuntimeRun.configure { dependsOn("testP6b1RuntimeResults") }
     if(p6b1ReleaseRuntime) tasks.register<JavaExec>("p6b1LifecycleProbe") {
         group="verification"
@@ -363,12 +371,33 @@ if (p1ReleaseRuntime) {
         args(layout.buildDirectory.get().asFile.absolutePath,androidComponents.sdkComponents.adb.get().asFile.absolutePath)
         notCompatibleWithConfigurationCache("Explicit interactive lifecycle diagnostic")
     }
+    if(p6b2ReleaseRuntime) tasks.register<JavaExec>("verifyP6b2OrdinaryRelease") {
+        dependsOn("assembleRelease",compileP1ApkVerifier)
+        classpath=files(compileP1ApkVerifier.flatMap { it.destinationDirectory })
+        mainClass.set("VerifyRuntimeApks")
+        systemProperty("p6b1.aapt2",androidComponents.sdkComponents.sdkDirectory.get().asFile.resolve("build-tools/${android.buildToolsVersion}/aapt2${if(System.getProperty("os.name").startsWith("Windows")) ".exe" else ""}").absolutePath)
+        args("--ordinary-release",layout.buildDirectory.file("outputs/apk/release/app-release-unsigned.apk").get().asFile.absolutePath,
+            layout.buildDirectory.file("outputs/mapping/release/mapping.txt").get().asFile.absolutePath,
+            layout.buildDirectory.file("reports/p6b2-runtime/ordinary-release-audit.properties").get().asFile.absolutePath)
+    }
+    if(p6b2ReleaseRuntime) for(mode in listOf("privacy","process","handoff","backup","release")) {
+        tasks.register<JavaExec>("p6b2"+mode.replaceFirstChar { it.uppercase() }+"Probe") {
+            group="verification"
+            dependsOn(verifyP1ReleaseApks,checkNotNull(verifyP4BuildIdentity),"verifyP6aIsolation","verifyP6b2OrdinaryRelease","testP6b2RuntimeResults")
+            classpath=files(compileP1ResultVerifier.flatMap { it.destinationDirectory },p1ResultProtocol)
+            mainClass.set("PrivacyProbeController")
+            args(mode,layout.buildDirectory.get().asFile.absolutePath,androidComponents.sdkComponents.adb.get().asFile.absolutePath,
+                androidComponents.sdkComponents.sdkDirectory.get().asFile.resolve("build-tools/${android.buildToolsVersion}").absolutePath,
+                checkNotNull(android.signingConfigs.getByName("debug").storeFile).absolutePath)
+            notCompatibleWithConfigurationCache("Explicit host-controlled Android privacy evidence")
+        }
+    }
     val connectedP1 = tasks.matching { it.name == "connectedP1ReleaseAndroidTest" }
     connectedP1.configureEach {
         dependsOn(prepareP1RuntimeRun)
         outputs.upToDateWhen { false }
     }
-    val runtimeCheck=tasks.register<JavaExec>(if(p6b1ReleaseRuntime) "p6b1ReleaseRuntimeCheck" else if(p6aReleaseRuntime) "p6aReleaseRuntimeCheck" else if(p5bReleaseRuntime) "p5bReleaseRuntimeCheck" else if(p5aReleaseRuntime) "p5aReleaseRuntimeCheck" else if(p4ReleaseRuntime) "p4ReleaseRuntimeCheck" else if(p3ReleaseRuntime) "p3ReleaseRuntimeCheck" else if (p2KdfBenchmark) "p2KdfBenchmarkCheck" else if (p2ReleaseRuntime) "p2ReleaseRuntimeCheck" else "p1ReleaseRuntimeCheck") {
+    val runtimeCheck=tasks.register<JavaExec>(if(p6b2ReleaseRuntime) "p6b2ReleaseRuntimeCheck" else if(p6b1ReleaseRuntime) "p6b1ReleaseRuntimeCheck" else if(p6aReleaseRuntime) "p6aReleaseRuntimeCheck" else if(p5bReleaseRuntime) "p5bReleaseRuntimeCheck" else if(p5aReleaseRuntime) "p5aReleaseRuntimeCheck" else if(p4ReleaseRuntime) "p4ReleaseRuntimeCheck" else if(p3ReleaseRuntime) "p3ReleaseRuntimeCheck" else if (p2KdfBenchmark) "p2KdfBenchmarkCheck" else if (p2ReleaseRuntime) "p2ReleaseRuntimeCheck" else "p1ReleaseRuntimeCheck") {
         group = "verification"
         description = "Run fresh $runtimeReports processed-APK tests and enforce its exact suite on EVERY selected device."
         dependsOn(connectedP1)
@@ -378,14 +407,14 @@ if (p1ReleaseRuntime) {
             androidComponents.sdkComponents.adb.get().asFile.absolutePath)
         if (cryptoRuntimeProfile != null) args(cryptoRuntimeProfile)
     }
-    if(p6aReleaseRuntime || p6b1ReleaseRuntime) {
+    if(p6aReleaseRuntime || p6b1ReleaseRuntime || p6b2ReleaseRuntime) {
         val diagnostics=tasks.register<JavaExec>("collectP6aRuntimeDiagnostics") {
             dependsOn(compileP1ResultVerifier)
             mustRunAfter(connectedP1,runtimeCheck)
             classpath=files(compileP1ResultVerifier.flatMap { it.destinationDirectory },p1ResultProtocol)
             mainClass.set("VerifyRuntimeResults")
             args("diagnose",layout.buildDirectory.get().asFile.absolutePath,
-                androidComponents.sdkComponents.adb.get().asFile.absolutePath,if(p6b1ReleaseRuntime) "p6b1" else "p6a")
+                androidComponents.sdkComponents.adb.get().asFile.absolutePath,if(p6b2ReleaseRuntime) "p6b2" else if(p6b1ReleaseRuntime) "p6b1" else "p6a")
         }
         prepareP1RuntimeRun.configure { finalizedBy(diagnostics) }
         connectedP1.configureEach { finalizedBy(diagnostics) }
@@ -400,13 +429,13 @@ if (p1ReleaseRuntime) {
         }
         // Build failures happen before the host controller can start. Capture this invocation's
         // FIRST failed task even then; old audit/runtime artifacts are explicitly excluded.
-        val qualificationRequested = p6b1ReleaseRuntime || gradle.startParameter.taskNames.any { name -> listOf("p6a2ProcessQualification","p6a2RebootPrepare","p6a2RebootResume").any { name.endsWith(it) } }
+        val qualificationRequested = p6b2ReleaseRuntime || p6b1ReleaseRuntime || gradle.startParameter.taskNames.any { name -> listOf("p6a2ProcessQualification","p6a2RebootPrepare","p6a2RebootResume").any { name.endsWith(it) } }
         val qualificationAttempt = UUID.randomUUID().toString()
-        val buildDiagnosticTask=if(p6b1ReleaseRuntime) "collectP6b1BuildDiagnostics" else "collectP6a2BuildDiagnostics"
+        val buildDiagnosticTask=if(p6b2ReleaseRuntime) "collectP6b2BuildDiagnostics" else if(p6b1ReleaseRuntime) "collectP6b1BuildDiagnostics" else "collectP6a2BuildDiagnostics"
         val qualificationDiagnostics = if(qualificationRequested) tasks.register(buildDiagnosticTask) {
             notCompatibleWithConfigurationCache("Collects failed task states for this explicit diagnostic invocation")
             doLast {
-                val directory=layout.buildDirectory.dir("reports/${if(p6b1ReleaseRuntime) "p6b1" else "p6a2"}-build-attempts/$qualificationAttempt").get().asFile
+                val directory=layout.buildDirectory.dir("reports/${if(p6b2ReleaseRuntime) "p6b2" else if(p6b1ReleaseRuntime) "p6b1" else "p6a2"}-build-attempts/$qualificationAttempt").get().asFile
                 directory.mkdirs()
                 val failed=gradle.taskGraph.allTasks.filter { it.state.failure!=null }
                 val text=buildString {
@@ -465,3 +494,10 @@ val testP6b1RuntimeResults=tasks.register<JavaExec>("testP6b1RuntimeResults") {
     mainClass.set("VerifyP6b1RuntimeResultsTest")
 }
 tasks.named("check") { dependsOn(testP6b1RuntimeResults) }
+
+val testP6b2RuntimeResults=tasks.register<JavaExec>("testP6b2RuntimeResults") {
+    dependsOn(compileP1ResultVerifier)
+    classpath=files(compileP1ResultVerifier.flatMap { it.destinationDirectory },p1ResultProtocol)
+    mainClass.set("VerifyP6b2RuntimeResultsTest")
+}
+tasks.named("check") { dependsOn(testP6b2RuntimeResults) }

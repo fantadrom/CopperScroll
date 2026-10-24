@@ -268,3 +268,20 @@ Android build/device/power-loss/fuzz/crypto vectors будущей библио�
 Один ID может иметь codec/core/integration/device ветви: P1…P5 принимают только
 явно перечисленные доступные подслучаи, не полный pass интеграционного ID до
 появления всех зависимостей. P6 итогово сводит матрицу и невыполненные ветви.
+
+
+## P6b.2: детализация открытых Android каналов (23 октября 2026)
+
+Приоритеты LIFE/LEAK/MAINT выше сохранены. [Матрица реализации и evidence](validation/p6b2-report.md)
+не закрывает P0 успешной сборкой. Пользовательская приёмка P6b.1 head758ba91:
+8/device + guided observations, регрессии13/7/8/8/10/8/8 на двух устройствах;
+отдельные rotation-Home/screen-off окна не подтверждены, не стали PASS.
+
+P6b.2 exact12 suite проверяет реальные native channels в target p1Release; отдельны
+primary UI-process force-stop/new PID+session/Locked, handoff checkpoint→actual
+Home/screen-off→Activity recreation, privacy observations, system backup/restore/
+transport/OEM и black-box ordinary release. Fresh XML+protobuf+runner exit и source/
+APK/mapping identity обязательны. Сканирование canaries и negative controls проверяет
+только конкретные маркеры/доступные поверхности, не отсутствие произвольных утечек.
+Actual keyboard/TalkBack/OEM transfer/API31 и P6c Card/media integration остаются
+release gates, пока соответствующие ветви не получили отдельное evidence.

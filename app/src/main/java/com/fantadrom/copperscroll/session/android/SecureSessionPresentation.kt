@@ -11,6 +11,9 @@ import java.lang.ref.WeakReference
 
 /** Holds no content. Both this port and child-window tracking use weak UI references. */
 class SecureSessionPresentation(activity: Activity,editor: EditText,private val coordinator: SessionCoordinator) : SessionCoordinator.Presentation {
+    private val windowPolicy=SessionWindowPolicy(activity)
+    private var access: com.fantadrom.copperscroll.session.ui.UiAccess?=null
+    private var policyEpoch: Long?=null
     private val activity=WeakReference(activity)
     private val editor=WeakReference(editor)
     private var window: SessionCoordinator.Window?=null
@@ -22,25 +25,42 @@ class SecureSessionPresentation(activity: Activity,editor: EditText,private val 
         check(Looper.myLooper()==Looper.getMainLooper())
         require(dialogs.size<4)
         dialog.window?.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
+        dialog.window?.let { windowPolicy.register(it); windowPolicy.refresh() }
         dialogs.add(WeakReference(dialog))
+    }
+    /** Worker-authenticated settings; rebind invalidates all previous editor connections. */
+    fun applySettings(epoch: Long,settings: com.fantadrom.copperscroll.storage.format.SettingsData): Boolean {
+        check(Looper.myLooper()==Looper.getMainLooper())
+        val w=window ?: return false; val cap=coordinator.currentCapability() ?: return false
+        if(!current(epoch)) return false
+        access?.retire()
+        access=com.fantadrom.copperscroll.session.ui.UiAccess.session(coordinator,w,cap,settings)
+        policyEpoch=epoch
+        (editor.get() as? ProtectedEditText)?.bindAccess(access!!)
+        windowPolicy.bind(access)
+        return true
     }
     /** Call only with an admitted read result from this epoch, on the UI thread. */
     fun display(epoch: Long,content: CharSequence): Boolean {
         check(Looper.myLooper()==Looper.getMainLooper())
         if(!current(epoch)) return false
-        editor.get()?.apply { setText(content); isEnabled=true; visibility=View.VISIBLE }
+        if(policyEpoch!=epoch && !applySettings(epoch,com.fantadrom.copperscroll.storage.format.SettingsData())) return false
+        windowPolicy.refresh()
+        editor.get()?.apply { setText(content); isEnabled=true; isLongClickable=true; visibility=View.VISIBLE }
         return true
     }
     override fun changed(snapshot: SessionCoordinator.Snapshot) {
         val a=activity.get() ?: return
         val update=Runnable {
-            secure(a)
+            windowPolicy.refresh()
             val now=coordinator.snapshot()
             if(!now.presented || !current(now.epoch)) hide() // Queued pre-unlock frames cannot clear a newer authenticated editor.
         }
         if(Looper.myLooper()==Looper.getMainLooper()) update.run() else a.runOnUiThread(update)
     }
     fun hide() {
+        access?.retire(); access=null; policyEpoch=null; windowPolicy.bind(null)
+        (editor.get() as? ProtectedEditText)?.invalidateAccess()
         editor.get()?.apply {
             android.view.inputmethod.BaseInputConnection.removeComposingSpans(text)
             context.getSystemService(android.view.inputmethod.InputMethodManager::class.java).hideSoftInputFromWindow(windowToken,0)
@@ -56,6 +76,7 @@ class SecureSessionPresentation(activity: Activity,editor: EditText,private val 
     }
     private fun clearEditors(group: android.view.ViewGroup) {
         for(i in 0 until group.childCount) when(val child=group.getChildAt(i)) {
+            is ProtectedEditText -> child.invalidateAccess()
             is EditText -> { child.setText(""); child.clearFocus(); child.isEnabled=false }
             is android.view.ViewGroup -> clearEditors(child)
         }

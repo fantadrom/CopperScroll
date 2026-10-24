@@ -1,0 +1,20 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <permission android:name="${applicationId}.p6a.GRANT_CONTROL" android:protectionLevel="signature" />
+    <uses-permission android:name="${applicationId}.p6a.GRANT_CONTROL" />
+    <queries><provider android:authorities="${applicationId}.test.p6a.external.documents" /></queries>
+    <application>
+        <!-- DocumentsProvider.attachInfo requires exported + MANAGE_DOCUMENTS. Every data/control
+             operation additionally checks the target UID; no third-party grant path is provided. -->
+        <provider android:name="com.fantadrom.copperscroll.p6aharness.ControlledDocumentsProvider"
+            android:authorities="${applicationId}.p6a.documents" android:exported="true"
+            android:permission="android.permission.MANAGE_DOCUMENTS" android:grantUriPermissions="true"
+            android:process=":p6aProvider">
+            <intent-filter><action android:name="android.content.action.DOCUMENTS_PROVIDER" /></intent-filter>
+        </provider>
+        <service android:name="com.fantadrom.copperscroll.p6aharness.P6aHelperService" android:exported="false" android:process=":p6aHelper" />
+        <activity android:name="com.fantadrom.copperscroll.p6aharness.P6aProviderProbeActivity" android:exported="false" />
+        <activity android:name="com.fantadrom.copperscroll.p6b1harness.P6b1SessionActivity" android:exported="false" />
+        <activity android:name="com.fantadrom.copperscroll.p6b1harness.P6b1PickerActivity" android:exported="false" />
+        <activity android:name="com.fantadrom.copperscroll.p6b2harness.P6b2SessionActivity" android:exported="false" />
+    </application>
+</manifest>

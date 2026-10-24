@@ -109,29 +109,37 @@ fun ColorPicker(selectedColor: Int, onSelect: (Int) -> Unit, onDismiss: () -> Un
 
 @Composable
 fun FolderDialog(draft: FolderDraft, onDismiss: () -> Unit, onConfirm: (FolderData) -> Unit) {
-    val focus = remember(draft) { FocusRequester() }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(stringResource(if (draft.editing) R.string.edit_folder else R.string.new_folder)) },
         text = {
             Row(verticalAlignment = Alignment.Top) {
                 ColorButton(draft.color, stringResource(R.string.folder_color)) { draft.choosingColor = true }
-                OutlinedTextField(
-                    value = draft.input,
-                    onValueChange = { draft.input = it; draft.error = false },
-                    label = { Text(stringResource(R.string.folder_name)) },
-                    singleLine = true,
-                    isError = draft.error,
-                    supportingText = if (draft.error) ({ Text(stringResource(R.string.folder_name_required)) }) else null,
-                    modifier = Modifier.weight(1f).focusRequester(focus)
+                // Native protected boundary, also in the RAM demo. No authenticated storage claim.
+                AndroidView(
+                    factory = { context -> com.fantadrom.copperscroll.session.android.ProtectedEditText(context).apply {
+                        bindAccess(com.fantadrom.copperscroll.session.ui.UiAccess.demo())
+                        setSingleLine(true)
+                        contentDescription=context.getString(R.string.folder_name)
+                        addTextChangedListener(object: android.text.TextWatcher {
+                            override fun beforeTextChanged(s: CharSequence?,start: Int,count: Int,after: Int) {}
+                            override fun onTextChanged(s: CharSequence?,start: Int,before: Int,count: Int) {
+                                if(readable()) { draft.input=androidx.compose.ui.text.input.TextFieldValue(s.toString()); draft.error=false }
+                            }
+                            override fun afterTextChanged(s: android.text.Editable?) {}
+                        })
+                    } },
+                    update = { editor -> if(editor.text.toString()!=draft.name) editor.setText(draft.name) },
+                    onRelease = { it.invalidateAccess() },
+                    modifier = Modifier.weight(1f)
                 )
+                if(draft.error) Text(stringResource(R.string.folder_name_required))
             }
         },
         confirmButton = {
             TextButton(onClick = {
                 if (draft.name.isBlank()) {
                     draft.error = true
-                    focus.requestFocus()
                 } else onConfirm(FolderData(draft.name, draft.color))
             }) { Text(stringResource(if (draft.editing) R.string.save else R.string.create)) }
         },
@@ -160,7 +168,7 @@ fun NoteEditorDialog(session: NoteSession, onClose: () -> Unit) {
                     .hideSoftInputFromWindow(editor.windowToken, 0)
             } else onClose()
         },
-        properties = DialogProperties(dismissOnClickOutside = false, usePlatformDefaultWidth = false, decorFitsSystemWindows = false)
+        properties = DialogProperties(securePolicy = androidx.compose.ui.window.SecureFlagPolicy.SecureOn, dismissOnClickOutside = false, usePlatformDefaultWidth = false, decorFitsSystemWindows = false)
     ) {
         // The outside box receives safe-area and IME insets before allocating 98% in each dimension.
         Box(Modifier.fillMaxSize().safeDrawingPadding().imePadding(), contentAlignment = Alignment.Center) {
