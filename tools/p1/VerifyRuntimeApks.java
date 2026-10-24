@@ -109,7 +109,7 @@ public final class VerifyRuntimeApks {
                 String suite="Lcom/fantadrom/copperscroll/storage/runtime/P6b2PrivacyRuntimeTest;";
                 require(testClasses.contains(suite) && !appClasses.contains(suite),"P6b2 suite isolation");
                 require(appClasses.contains("Lcom/fantadrom/copperscroll/p6b2harness/P6b2SessionActivity;"),"P6b2 target missing");
-                for(String method:List.of("sessionPoliciesFollowAuthenticatedZones","staleConnectionCannotReadOrMutateNextSession","editorInfoAndCredentialQueryBoundary","blockedCopyCutAndIndependentPaste","sensitiveCopyDoesNotEnableOtherExports","richTextUtf16AndStaleCallbacks","emptyAssistAutofillCaptureStructures","hiddenPasswordAccessibilityAndStaleActions","windowPolicyRejectsStaleAllowCallbacks","savedStateAndCanaryAudit","recreationRetiresNativeConnection","maintenanceHidesBeforeServiceWork"))
+                for(String method:List.of("sessionPoliciesFollowAuthenticatedZones","staleConnectionCannotReadOrMutateNextSession","editorInfoAndCredentialQueryBoundary","blockedCopyCutAndIndependentPaste","sensitiveCopyDoesNotEnableOtherExports","richTextUtf16AndStaleCallbacks","emptyAssistAutofillCaptureStructures","hiddenPasswordAccessibilityAndStaleActions","windowPolicyRejectsStaleAllowCallbacks","savedStateAndCanaryAudit","recreationRetiresNativeConnection","maintenanceHidesBeforeServiceWork","longPressAfterReplacementKeepsUtf16AndSessionBoundary","harnessInsetsRemainOutsideScrollAcrossOrientations"))
                     require((testIndex.classes.get(suite).methods.getOrDefault(method+"()V",0)&1)!=0,"P6b2 method missing: "+method);
             }
             require(appClasses.containsAll(BACKEND), "Processed target is missing backend definitions");

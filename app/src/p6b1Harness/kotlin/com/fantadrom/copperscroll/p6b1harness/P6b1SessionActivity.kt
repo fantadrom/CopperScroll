@@ -22,7 +22,8 @@ open class P6b1SessionActivity: ComponentActivity() {
     var child: Dialog?=null; private set
     var lastPickerRejected=false; private set
     var manualFinished=false; private set
-    private lateinit var root: SessionWindowRoot
+    lateinit var root: SessionWindowRoot; private set
+    val scroll get()=root.getChildAt(0) as ScrollView
     private val refresh=android.os.Handler(android.os.Looper.getMainLooper())
     private val tick=object: Runnable {
         override fun run() {
@@ -38,6 +39,7 @@ open class P6b1SessionActivity: ComponentActivity() {
         }
     }
     override fun onCreate(state: Bundle?) {
+        window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON) // test host only; POWER/lock still work
         SecureSessionPresentation.secure(this); super.onCreate(null) // no sensitive saved-state restore
         val layout=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL }
@@ -75,6 +77,7 @@ open class P6b1SessionActivity: ComponentActivity() {
             button("Confirm observed: $step") { model.manualSteps.add(step); model.event("USER_ACK_$step") }
         button("Finish manual probe") { model.event("USER_FINISHED"); manualFinished=true }
         root=SessionWindowRoot(this).apply { addView(ScrollView(this@P6b1SessionActivity).apply { addView(layout) }) }; setContentView(root)
+        HarnessWindowInsets.install(window,root)
         presentation=SecureSessionPresentation(this,editor,model.coordinator)
         signals=AndroidSessionSignals(this,model.coordinator,model.worker,presentation,model.transfer)
         root.windowSignal={ signals.onWindowVisibilityChanged() }
@@ -85,14 +88,26 @@ open class P6b1SessionActivity: ComponentActivity() {
         val scroll=root.getChildAt(0) as ScrollView
         (scroll.getChildAt(0) as LinearLayout).addView(view)
     }
-    fun showOwnDialog() {
+    fun showOwnDialog(input: ProtectedEditText=ProtectedEditText(this)): ProtectedEditText {
+        check(child==null)
         val scope=signals.ownWindowOpened(SessionCoordinator.ScopeKind.Modal)
-        val input=ProtectedEditText(this).apply { bindAccess(com.fantadrom.copperscroll.session.ui.UiAccess.session(model.coordinator,signals.window,checkNotNull(model.coordinator.currentCapability()))); setText("P6b1 synthetic dialog"); isSaveEnabled=false; id=View.NO_ID }
-        val dialog=Dialog(this).apply { setContentView(input); window!!.addFlags(WindowManager.LayoutParams.FLAG_SECURE) }
+        input.apply { bindAccess(com.fantadrom.copperscroll.session.ui.UiAccess.session(model.coordinator,signals.window,checkNotNull(model.coordinator.currentCapability()))); setText("P6b1 synthetic dialog"); isSaveEnabled=false; id=View.NO_ID }
+        val dialog=Dialog(this)
+        dialog.window!!.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
+        dialog.window!!.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
+        val content=LinearLayout(this).apply {
+            orientation=LinearLayout.VERTICAL; addView(input)
+            addView(Button(this@P6b1SessionActivity).apply { text="Close synthetic dialog"; setOnClickListener { dialog.dismiss() } })
+        }
+        val outer=FrameLayout(this).apply { addView(ScrollView(this@P6b1SessionActivity).apply { addView(content) }) }
+        dialog.setContentView(outer); HarnessWindowInsets.install(dialog.window!!,outer)
         presentation.register(dialog)
         dialog.setOnDismissListener { signals.ownWindowClosed(scope); child=null }
         dialog.window!!.decorView.viewTreeObserver.addOnWindowFocusChangeListener { if(it || dialog.isShowing) signals.childFocus(scope,it) }
-        child=dialog; dialog.show(); model.event("OWN_DIALOG_SHOWN")
+        child=dialog; dialog.show()
+        dialog.window!!.setLayout(WindowManager.LayoutParams.MATCH_PARENT,WindowManager.LayoutParams.MATCH_PARENT)
+        model.event("OWN_DIALOG_SHOWN")
+        return input
     }
     fun recreateOwned() { model.transfer=signals.beginConfiguration(); recreate() }
     fun launchPicker() {
@@ -129,6 +144,12 @@ open class P6b1SessionActivity: ComponentActivity() {
 class P6b1PickerActivity: Activity() {
     override fun onCreate(state: Bundle?) {
         window.addFlags(WindowManager.LayoutParams.FLAG_SECURE); super.onCreate(null)
-        setContentView(Button(this).apply { text="Cancel synthetic picker"; setOnClickListener { setResult(RESULT_CANCELED); finish() } })
+        window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
+        val outer=FrameLayout(this).apply {
+            addView(ScrollView(this@P6b1PickerActivity).apply {
+                addView(Button(this@P6b1PickerActivity).apply { text="Cancel synthetic picker"; setOnClickListener { setResult(RESULT_CANCELED); finish() } })
+            })
+        }
+        setContentView(outer); HarnessWindowInsets.install(window,outer)
     }
 }

@@ -6,6 +6,7 @@ import android.view.*
 import android.view.accessibility.*
 import android.view.inputmethod.*
 import android.widget.EditText
+import com.fantadrom.copperscroll.session.ui.WordSelection
 import com.fantadrom.copperscroll.session.ui.UiAccess
 import java.lang.reflect.InvocationTargetException
 import java.lang.reflect.Proxy
@@ -15,6 +16,8 @@ import java.lang.reflect.Proxy
 open class ProtectedEditText(context: Context): EditText(context) {
     private var authority: UiAccess?=null
     private var generation=0L
+    private var textRevision=0L
+    private var selectingWord=false
     private var hiddenPassword=false
     private var mode: ActionMode?=null
     private var pasteGeneration: Long?=null
@@ -51,26 +54,51 @@ open class ProtectedEditText(context: Context): EditText(context) {
         // Do not call Editor's ProcessText/assist callback: in AOSP it fires intents BEFORE
         // customSelectionActionModeCallback. Filtering a menu alone is not an action boundary.
         setTextClassifier(android.view.textclassifier.TextClassifier.NO_OP)
-        setOnLongClickListener {
-            if(readable() && !hiddenPassword) {
-                if(selectionStart==selectionEnd && length()>0) {
-                    val offset=getOffsetForPosition(downX,downY).coerceIn(0,length()-1)
-                    val words=java.text.BreakIterator.getWordInstance().apply { setText(text.toString()) }
-                    var from=words.preceding(offset+1).coerceAtLeast(0)
-                    var to=words.following(offset).let { if(it<0) length() else it }
-                    if(from>0 && Character.isLowSurrogate(text[from])) from--
-                    if(to<length() && Character.isLowSurrogate(text[to])) to++
-                    setSelection(from,to)
-                }
-                startActionMode(object: ActionMode.Callback {
-                    override fun onCreateActionMode(m: ActionMode,menu: Menu)=true
-                    override fun onPrepareActionMode(m: ActionMode,menu: Menu)=true
-                    override fun onActionItemClicked(m: ActionMode,item: MenuItem)=false
-                    override fun onDestroyActionMode(m: ActionMode) {}
-                },ActionMode.TYPE_FLOATING)
+        addTextChangedListener(object: android.text.TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?,start: Int,count: Int,after: Int) {}
+            override fun onTextChanged(s: CharSequence?,start: Int,before: Int,count: Int) {
+                if(textRevision<Long.MAX_VALUE) textRevision++ // Saturation refuses a new selection attempt.
             }
-            true // Never enter Editor's outbound-drag long-press implementation.
-        } // Native drag initiation is disabled separately.
+            override fun afterTextChanged(s: android.text.Editable?) {}
+        })
+        setOnLongClickListener { selectWordAndOpenMenu(); true }
+    }
+    private fun selectWordAndOpenMenu() {
+        check(Looper.myLooper()==Looper.getMainLooper())
+        if(selectingWord || !readable() || hiddenPassword || textRevision==Long.MAX_VALUE) return
+        selectingWord=true
+        try {
+            val capturedGeneration=generation; val capturedRevision=textRevision; val capturedAuthority=authority
+            val editable=this.text ?: return
+            val snapshot=editable.toString()
+            fun current()=generation==capturedGeneration && authority===capturedAuthority &&
+                textRevision==capturedRevision && this.text===editable && snapshot.contentEquals(editable) && readable() && !hiddenPassword
+            val offset=getOffsetForPosition(downX,downY) // May synchronously re-enter application code.
+            if(!current()) return
+            val start=selectionStart; val end=selectionEnd
+            val range=if(start!=end && WordSelection.boundary(snapshot,start) && WordSelection.boundary(snapshot,end) &&
+                offset in minOf(start,end)..maxOf(start,end)) WordSelection.Range(minOf(start,end),maxOf(start,end))
+                else WordSelection.range(snapshot,offset)
+            if(!current()) return
+            if(range!=null) {
+                try { setSelection(range.start,range.end) }
+                catch(stale: IndexOutOfBoundsException) {
+                    // A SpanWatcher can mutate the same Editable between Selection's two span writes.
+                    // Only a proven invalidated attempt is cancelled; unexplained range bugs still fail.
+                    if(current()) throw stale
+                    return
+                }
+            }
+            // Selection callbacks may replace/mutate text, revoke/rebind, or recursively long-press.
+            if(!current()) return
+            val created=startActionMode(object: ActionMode.Callback {
+                override fun onCreateActionMode(m: ActionMode,menu: Menu)=true
+                override fun onPrepareActionMode(m: ActionMode,menu: Menu)=true
+                override fun onActionItemClicked(m: ActionMode,item: MenuItem)=false
+                override fun onDestroyActionMode(m: ActionMode) {}
+            },ActionMode.TYPE_FLOATING)
+            if(!current()) created?.finish()
+        } finally { selectingWord=false }
     }
     private fun populate(menu: Menu) {
         menu.clear()
@@ -85,13 +113,15 @@ open class ProtectedEditText(context: Context): EditText(context) {
     override fun startActionMode(callback: ActionMode.Callback): ActionMode? = startActionMode(callback,ActionMode.TYPE_PRIMARY)
     override fun startActionMode(callback: ActionMode.Callback,type: Int): ActionMode? {
         if(!readable()) return null
-        val captured=generation
+        val captured=generation; val lease=authority
+        fun current()=captured==generation && lease===authority && readable()
         val created=super.startActionMode(object: ActionMode.Callback {
-            override fun onCreateActionMode(mode: ActionMode,menu: Menu): Boolean { populate(menu); return readable() }
-            override fun onPrepareActionMode(mode: ActionMode,menu: Menu): Boolean { populate(menu); return true }
+            override fun onCreateActionMode(mode: ActionMode,menu: Menu): Boolean { if(!current()) return false; populate(menu); return current() }
+            override fun onPrepareActionMode(mode: ActionMode,menu: Menu): Boolean { if(!current()) { menu.clear(); return false }; populate(menu); return current() }
             override fun onActionItemClicked(mode: ActionMode,item: MenuItem): Boolean = captured==generation && onTextContextMenuItem(item.itemId)
             override fun onDestroyActionMode(mode: ActionMode) { callback.onDestroyActionMode(mode) }
         },type)
+        if(!current()) { created?.finish(); return null }
         mode=created; return created
     }
     override fun onCreateContextMenu(menu: ContextMenu) {

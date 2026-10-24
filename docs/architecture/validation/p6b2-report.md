@@ -1,5 +1,13 @@
 # P6b.2 — Android output boundaries and remaining lifecycle evidence
 
+Обновление24 октября2026: исправление long-press и safe viewport в том же Draft
+PR№16. Актуальный обязательный набор — **14 методов на устройство**. Новые Android
+прогоны агента NOT_RUN; **предыдущий отказ handoff на Honor остаётся OPEN**.
+Диагностика, причина, изменения и результаты повторных проверок приведены в
+[обновлении ниже](#исправление-долгого-нажатия-и-отступов--24-октября-2026).
+Ниже сохранена история исходной реализации23 октября, её результаты не подменяют
+проверку исправления на устройствах.
+
 23 октября2026. Ветка `codex/copper-scroll-p6b2-data-leak-boundaries`, база актуального
 origin/master **30fd27d962b7ed9192717ec2c60e59d91bb5ccd7** (merge PR15). Fetch/API
 подтвердили merge и ancestry принятого implementation head
@@ -125,7 +133,7 @@ release; storage/ICU/crypto/application UI вне scope. Никаких blanket 
 release по DEX/manifest/isolation audit. Обычный release дополнительно имеет отдельный
 mapping-marker/manifest/exclusions/production class audit без runtime ABI.
 
-Exact12 `P6b2PrivacyRuntimeTest` совпадают с validator/DEX audit/Windows инструкцией:
+Актуальные exact14 `P6b2PrivacyRuntimeTest` совпадают с validator/DEX audit/Windows инструкцией:
 
 | Метод | Основной реальный boundary |
 | --- | --- |
@@ -141,13 +149,15 @@ Exact12 `P6b2PrivacyRuntimeTest` совпадают с validator/DEX audit/Windo
 | savedStateAndCanaryAudit | actual saveHierarchyState, files/cache/noBackup/prefs и свой process log; negative control |
 | recreationRetiresNativeConnection | actual Activity recreation, новый window, старый connection/empty old editor |
 | maintenanceHidesBeforeServiceWork | actual coordinator Maintenance admission немедленно скрывает/отказывает native input |
+| longPressAfterReplacementKeepsUtf16AndSessionBoundary | реальный injected touchscreen long-press после replace/setText, конец/empty/multiline/emoji, reentrant selection mutation и bind/revoke, разрешённый sensitive copy и отказ экспорта |
+| harnessInsetsRemainOutsideScrollAcrossOrientations | реальные portrait/landscape layouts общего host, privacy controls, собственного dialog и picker; safe root до ScrollView, прокрутка к обоим краям |
 
 Gate: fresh per-device exact XML + completed protobuf + runner exit0, без zero/
 partial/duplicates/skipped/crash/stale/foreign/results/source/APK mismatches.
 Host fixtures проверяют вложенные testsuites без двойного подсчёта и негативные
 условия; это не Android acceptance. Исходный source gate обязательный, не обходился.
 
-Остальные результаты **не складываются с12 correctness tests**:
+Остальные результаты **не складываются с14 correctness tests**:
 
 - privacy: пять отдельных user statuses,12мин/device, отсутствующее NOT_RUN, FAIL
   сохраняется до gate; нет автоматической установки/смены IME/services/settings;
@@ -237,7 +247,7 @@ P6c; (2) срок/UX очистки уже разрешённого sensitive cl
 artwork/sorting/icon overlays и suppressible warnings нет. App message suppression
 по-прежнему только для согласованного card-editor сообщения.
 
-## Фактическая проверка агента и передача
+## Историческая проверка исходной реализации23 октября и передача
 
 Среда Linux, Oracle JDK25.0.4.1, нормативный Gradle9.6.0/checksum, AGP9.4.1,
 Kotlin2.2.10, compile/target37, min31, target11, pinned dependencies и R8 scope прежние.
@@ -250,7 +260,7 @@ Default validation завершилась BUILD SUCCESSFUL:201 JVM tests/32 suit
 0 failures/errors/skipped; lintDebug/release0 errors (16/18 warnings), debug/release/
 debugAndroidTest собраны. Окончательные opt-in audit counts/hashes приведены ниже
 после их фактического завершения. Windows probes готовы, но не объявлены выполненными.
-Обязательная новая матрица:12/device P6b.2 +8/device P6b.1 +13/device P6a. Общая runtime
+Обязательная новая матрица:14/device P6b.2 +8/device P6b.1 +13/device P6a. Общая runtime
 packaging/ABI/agent startup изменены, поэтому7/8/8/10/8/8 P1/P2/P3/P4/P5a/P5b на новом
 коде обоснованы; старую пользовательскую приёмку это не отменяет. KDF benchmarks и
 P6a.2 reboot автоматически не запускаются. Power-loss/storage qualification,
@@ -362,3 +372,189 @@ preparedSigningRuntime=NOT_RUN
 BUILD SUCCESSFUL5m36s:201 tests/32 suites,0 failures/errors/skipped; lint0 errors
 (16/18 warnings), debug/release/debugAndroidTest PASS. Финальный p1Release lint
 0 errors/44 warnings. Direct RuntimeSourceIdentity verify после report-only правок PASS.
+
+
+## Исправление долгого нажатия и отступов — 24 октября 2026
+
+Рабочая ветка и актуальный remote head перед изменениями:
+`codex/copper-scroll-p6b2-data-leak-boundaries`,
+**90ceeb20e9264548c5eeeab262eb2febecaff0ed**. Fetch и PR API подтвердили PR№16
+OPEN/DRAFT, без merge. Изменения сделаны в этой ветке; R8/optimization/keep rules,
+Gradle9.6.0/checksum, AGP/Kotlin/dependencies, storage admission и правила
+SessionCoordinator не менялись.
+
+### Входная диагностика и установленная причина
+
+Прочитан пользовательский `p6b2-privacy.zip`, SHA256
+`91d2d110774c9207f23060026ad152354f9712a3cc10ba7878d8095c6db3ca65`.
+Два hostRunId: `45115955-0a7f-41db-af1c-4daa3adb212d` и
+`754426a1-c1e6-4ead-801b-5eb8d034ca72`. В каждом device-0 — Honor ABR-LX1/API35,
+device-1 — Virtual_Pixel_6/API37. Все четыре runtime-result: **FAIL**, runner
+`Process crashed`, controller `PROBE_RUNNER_FAILED`. Это пользовательские
+Windows/Gradle9.6.0 прогоны, не исполнение агента; пройденные до падения шаги не
+составляют успешный privacy probe.
+
+Стек указывает на `IndexOutOfBoundsException: setSpan (33 ... 33) ends beyond
+length …`, `ProtectedEditText._init_$lambda$2(ProtectedEditText.kt:63)`. В первом
+run длина editor18 на обоих устройствах, во втором29/32. Вложенные artifact ZIP
+содержат соответствующие mappings, их marker IDs совпадают с provenance:
+
+```properties
+sourceRevision=90ceeb20e9264548c5eeeab262eb2febecaff0ed
+targetMapId=437f9f3dcf2d9587d44475d2b053d424f2f224f7f0a0b0a71cb0918280699373
+testMapId=cfa8a325decb338b116f56ee6471eaf7dde5938b7e236e4305a745aacd9acc73
+targetMappingSha256=98be1215904632740db72ad4eb853e20e6e64f2e602657e600e454f7f125dfba
+testMappingSha256=7b56f8ef7401e89e828db206998434f85cd0f6498fda66695a669f7dbce58ecc
+```
+
+Application editor находится вне R8 optimization scope; его исходные имена уже
+присутствуют в стеке. Анализ исходника90ceeb2 и `javap -c -p` сохранённого compile
+JAR подтвердил receiver shadowing: в
+`BreakIterator.getWordInstance().apply { setText(text.toString()) }` имя `text`
+обращается к **BreakIterator.getText(): CharacterIterator**, а не к editor.text.
+Iterator получает строковое представление своего CharacterIterator. Границы по
+чужой строке применяются к editor. Это установленная ошибка независимо от
+сокращения текста или предполагаемой гонки; чужой mapping не использовался для
+достоверного retrace. JVM negative control воспроизводит ошибочный receiver и
+выход границы за длину короткого editor.
+
+### Production-исправление
+
+`WordSelection.range` получает один immutable String; `BreakIterator.setText`
+вызывается с ним явно, возвращая UTF-16 offsets именно этого снимка. На конце
+выбирается последняя code point, границы не разрывают surrogate pair; emoji,
+combining marks и переводы строк не нормализуются и не изменяются.
+
+`ProtectedEditText` захватывает Editable identity, text revision, String snapshot,
+UI authority и binding generation. После вычисления offset, перед setSelection
+и после синхронных selection callbacks повторно проверяются все эти условия и
+живой session/window access. Replace/setText, rebind/revoke отменяют прежнюю
+попытку; повторный long-click из callback не входит в обработчик рекурсивно.
+Узкая обработка IndexOutOfBoundsException между двумя Selection span writes
+допустима только при **доказанной утрате актуальности снимка**; при неизменном
+состоянии исключение повторно выбрасывается. Исправление не сводится к catch.
+
+ActionMode также связан с прежними generation/authority при create/prepare/click;
+позднее меню не получает прав следующей сессии. Сохраняются выбор слова/существующего
+актуального выделения, sensitive copy при разрешении зоны, запрет share/assist/
+process-text/drag, скрытые пароли и немедленный отказ после revoke. IO, owner,
+ключи, persistence, S1 и формат контейнера не затронуты.
+
+### Изменения только тестового интерфейса и стенда
+
+Общий P6b.1/P6b.2 host, synthetic picker и собственный Dialog используют
+`HarnessWindowInsets`: root viewport вне ScrollView, сверху/снизу эффективный
+отступ **max(40dp, systemBars/displayCutout)**. Измеренная уже потреблённая часть
+decor вычитается, по бокам учитываются панели и cutout в landscape. Все controls,
+включая Close dialog, находятся в прокрутке. adjustResize и измерение оставшегося
+IME overlap позволяют не применить уменьшение под IME дважды. У собственного
+окна secure flag задаётся до показа, scope/register/close остаются прежними;
+постоянного диагностического входа в ordinary release нет.
+
+Новые Android методы включены одновременно в exact result gate, DEX audit,
+host fixtures и Windows-инструкцию: теперь ровно14 completed PASS/device, исходные
+12 методов сохранены. Long-press отправляет MotionEvent DOWN/UP через UiAutomation,
+ждёт фактический callback по условию, вычисляет координаты заново из layout,
+padding/scroll и текущего положения View. Проверяются исходный текст → сокращение
+Editable → замена setText, начало/середина/конец, empty/multiline/emoji, синхронная
+mutation/reentry selection, смена binding и revoke → новая decoy session.
+Фиксированных задержек для «стабилизации» нет. Ordinary-release координатные
+действия уже вычислялись по актуальным accessibility node bounds; screen constants
+после изменения layout не добавлены.
+
+Viewport regression проверяет portrait/landscape, общую status/editor/нижние
+privacy controls, собственное окно/Close и synthetic picker/Cancel. Ориентация
+меняется в Locked, а не обходом handoff; coordinator/admission не ослаблены.
+Геометрия consumed insets и IME дополнительно покрыта JVM. Это не заменяет
+визуальную проверку Honor corners/camera cutout и реальную IME на обоих устройствах.
+
+### Проверки исправления
+
+Предварительный host run: **210 JVM tests /34 suites,0 failures/errors/skipped**;
+P6b.2 host gate69, source gate92, P6b.1 result gate24, diagnostics20 — PASS.
+Финальная Android instrumentation Kotlin compilation — BUILD SUCCESSFUL. Проверки
+после исправления завершены (это host/build evidence, не Android execution):
+
+| Проверка | Результат24 октября |
+| --- | --- |
+| Full JVM | 210 tests/34 suites,0 failures/errors/skipped; новые WordSelection5 и InsetsGeometry4 включены |
+| Host gates | P6b.2 result69, обязательный source92, P6b.1 result24, runtime diagnostics20 — PASS |
+| lintDebug / lintRelease / lintP1Release | 0 errors/fatal;16/18/45 warnings, без новых blanket suppressions; дополнительный opt-in SetTextI18n относится к synthetic Close dialog button |
+| debug / ordinary release / debugAndroidTest | BUILD SUCCESSFUL3m43s |
+| p1Release / p1ReleaseAndroidTest + audits | BUILD SUCCESSFUL1m43s; существующий R8 сохранён, target/test реально собраны, final source unchanged PASS |
+| Окончательный source/artifact/ordinary/isolation refresh после правки инструкции | BUILD SUCCESSFUL15s; оба APK UP-TO-DATE, input fingerprint захвачен заново, source unchanged PASS |
+| Actual APK audits | production backend/crypto target-only,0 duplicate definitions, hierarchy/package access и linkage PASS;3950 ICU resources/goldens PASS |
+| Compiled manifest / backup / isolation / ordinary mapping | PASS, test controls отсутствуют в ordinary release |
+| Negative copies |14 backup/agent +7 isolation/provider ACL +2 privacy ACL/ordinary mapping =23 отказанных копии; originals unchanged |
+| User entry points | dry-run проверки automatic/privacy подготовлен отдельно; не исполняет Android |
+| Honor15 / emulator17 / API31 runtime исправления | NOT_RUN агентом |
+
+Команды текущей проверки (Linux, JDK25.0.4.1/Gradle9.6.0, подготовленные SDK/cache):
+
+```bash
+bash gradlew :app:testDebugUnitTest :app:testP6b2RuntimeResults :app:testP4SourceIdentity :app:testP6b1RuntimeResults :app:testP6aRuntimeDiagnostics --offline --no-daemon --no-parallel --max-workers=2 --console=plain
+bash gradlew :app:lintDebug :app:lintRelease :app:assembleDebug :app:assembleRelease :app:assembleDebugAndroidTest --offline --no-daemon --no-parallel --max-workers=2 --console=plain
+bash gradlew -Pp6b2ReleaseRuntime=true :app:testP6b2RuntimeResults :app:testP4SourceIdentity :app:verifyP1ReleaseApks :app:verifyP4BuildIdentity :app:verifyP6aIsolation :app:verifyP6b2OrdinaryRelease :app:lintP1Release --offline --no-daemon --no-parallel --max-workers=2 --no-configuration-cache --console=plain
+python3 tools/p6b1/check-backup.py p6b2
+python3 tools/p6a/check-isolation.py p6b2
+python3 tools/p6b2/check-privacy-apks.py
+bash gradlew -Pp6b2ReleaseRuntime=true :app:p6b2ReleaseRuntimeCheck :app:p6b2PrivacyProbe --dry-run --offline --no-daemon --no-parallel --max-workers=2 --no-configuration-cache --console=plain
+```
+
+Новые pre-commit артефакты (HEAD90ceeb2 с исправленными исходниками, не clean build
+будущего commit):
+
+```properties
+sourceRevision=90ceeb20e9264548c5eeeab262eb2febecaff0ed
+sourceCodeDirty=true
+sourceDirty=true
+workingTreeDirty=true
+wrapperModified=false
+sourceFingerprint=3548669c7d345b17d04b9e417c7b13a9b49456c335052c25b0105ff601345c6a
+artifactBundleId=64911741e506e8d2ae61094fa1ed5589ed4abf3f6bd09f240ad82c39b75320ce
+targetSha256=06e460883cdf9b177ca32dbb729d9122f64175e68a7b47051b89b5d4f451b00f
+testSha256=65eab70a92e1ed84c4239270723528fc65328e169da6f430001cb59e9cfd194c
+targetMapId=8f4e34faa7fc68eee1d40a36b256f5a17ce4226945d2f9bc3ae2e9dba1738ff8
+testMapId=cb691b5d9420c27087a3f8a10b55fdf8de83638d9e1be5170274e183ec6e697f
+targetMappingSha256=ad12856fb5526be6d01ea370e6a3f21bdb8d83985b1a3fbea16bdf2e4c3d964e
+testMappingSha256=38add240c3652c8bcc3fccdd61f0eb60379ac183720415bba280c8d85f442940
+ordinaryReleaseSha256=b96f470be6036327b3bf558af1fca8c43cc10e527c4c5da90cce388b45faf1a8
+ordinaryReleaseMapId=77d87bc9f94728d9649627fa28ec2e185cedc06b8b5c19672fab9decb0aaaa0a
+AndroidRuntime=NOT_RUN
+```
+
+Оба mappings, configuration, generated instrumentation ABI и manifests находятся
+в `app/build/reports/p6b2-runtime/artifacts/<artifactBundleId>/`, audit reports —
+рядом, failed/build attempt archives — отдельно. Следующий пользовательский запуск
+захватит свой свежий SHA/fingerprint/APK/mappings; старые receipts не переносятся.
+Приведённые выше historical23 October hashes сохранены как история.
+
+### Оставшиеся условия и повторный запуск
+
+Android runner здесь отсутствует: нет /dev/kvm, system-images и emulator;
+`adb devices -l` не смог запуститься из-за read-only `/home/agent/.android`.
+Это не успешно полученный пустой список устройств. Исправленный автоматический
+runtime, ручной privacy probe, portrait/landscape/IME/dialog на Honor15 и AVD17 —
+**NOT_RUN агентом**, runtime PASS по компиляции или APK audit не заявлен.
+
+После pull текущей ветки PR№16 выполнить последовательно в Windows Terminal:
+
+```powershell
+.\gradlew.bat -Pp6b2ReleaseRuntime=true :app:p6b2ReleaseRuntimeCheck --no-configuration-cache --console=plain
+.\gradlew.bat -Pp6b2ReleaseRuntime=true :app:p6b2PrivacyProbe --no-configuration-cache --console=plain
+```
+
+Первый результат:14 completed PASS на каждом устройстве (28 на двух),0 failures/
+errors/skipped и BUILD SUCCESSFUL. Второй: отдельные пользовательские observations
+пяти групп; проверить выделение после замены, оба положения экрана и клавиатуру,
+собственное окно, верх/низ прокрутки по [инструкции](../../../tools/p6b2/android-runtime-windows.md).
+Прислать свежий runtime-result, оба privacy receipts и описание обеих ориентаций;
+при отказе — текущий diagnostics ZIP/Terminal. Старый12-method report gate не
+принимает. Требуемая P6b.1 регрессия по-прежнему8/device, остальные регрессии
+и ограничения p1Release/обычного release, API31 и storage REFUSED сохранены.
+
+**Отдельная открытая проблема: предыдущий пользовательский handoff FAIL на Honor.**
+Этот архив касается long-press/privacy, нового успешного handoff receipt не
+содержит. Причина того отказа и его исправление не объявлены установленными;
+long-press/viewport PASS не закроет его. P6b.2/P6b целиком не приняты; PR№16
+сохраняется Draft, без merge.

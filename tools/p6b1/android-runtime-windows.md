@@ -1,6 +1,8 @@
 # P6b.1 — Windows / Honor Android15 / emulator Android17
 
-Ветка `codex/copper-scroll-p6b1-session-lifecycle`, новый Draft PR; не master.
+Для текущей регрессии общего test UI: ветка
+`codex/copper-scroll-p6b2-data-leak-boundaries`, Draft PR№16. Историческая P6b.1
+приёмка ветки `codex/copper-scroll-p6b1-session-lifecycle` сохранена отдельно.
 Android Studio: Git → Update Project, Gradle JDK проекта (нормативный wrapper9.6.0),
 дождаться Sync. Исходники/Gradle/keep rules вручную не редактировать. Подключить
 разблокированный Honor с разрешённым USB debugging и запустить Android17 AVD.
@@ -76,7 +78,13 @@ Run **P6b1 Lifecycle Probe** либо:
 с `deviceRunId` в individual receipt. Test host содержит только synthetic текст.
 После каждого revoke нажимать **Synthetic Main**/**Synthetic Decoy** явно, когда
 owner завершён; возврат/Back/focus сами вход не выполняют. Состояние показывается
-над editor. При revoke editor должен исчезнуть, очистить текст/selection и перестать
+над editor. На **Honor и эмуляторе, в портретной и горизонтальной ориентации**
+проверить видимость всей верхней строки, editor и нижних кнопок: прокрутить к обоим
+краям с закрытой и открытой IME. Общий root держит top/bottom=max(40dp,safe inset)
+от края окна, вырез/панели слева и справа учитываются; padding вне scroll content,
+уже применённые decor insets не удваиваются. Проверить также Own dialog и Close
+synthetic dialog. Все элементы должны оставаться доступны через прокрутку.
+Перекрытие или недоступная кнопка — отказ, не подтверждать соответствующий шаг. При revoke editor должен исчезнуть, очистить текст/selection и перестать
 принимать ввод, свой dialog закрыться. Сравнивать результат с шагами:
 
 1. Войти, выключить экран, заблокировать обычным способом; разблокировать вручную.

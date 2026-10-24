@@ -16,7 +16,7 @@ import com.fantadrom.copperscroll.storage.transaction.WriteCode
 import org.junit.*
 import org.junit.Assert.*
 
-/** Twelve exact independent Android boundaries, synthetic only. No OEM/IME-service certification. */
+/** Fourteen exact independent Android boundaries, synthetic only. No OEM/IME-service certification. */
 class P6b2PrivacyRuntimeTest {
     private val d=P6b2Driver()
     @Before fun before()=d.start()
@@ -187,6 +187,147 @@ class P6b2PrivacyRuntimeTest {
         d.await("NEW_WINDOW_NOT_PRESENTED") { d.host()!==old && d.host().model.coordinator.snapshot().presented && d.host().editor.visibility==View.VISIBLE }
         d.ui { assertNull(connection.getTextAfterCursor(100,0)); assertFalse(connection.commitText("old window",1)); assertTrue(old.editor.text.isEmpty()) }
         assertEquals(0,d.host().model.savedBundleKeys)
+    }
+    @Test fun longPressAfterReplacementKeepsUtf16AndSessionBoundary() {
+        d.login(); lateinit var e: LongPressEditor
+        d.ui { e=LongPressEditor(d.host()).apply { showSoftInputOnFocus=false }; d.host().showOwnDialog(e) }
+        fun prepare(value: String) {
+            d.ui { e.bindAccess(d.lease(SettingsData(copyBlocked=false))); e.setText(value) }
+        }
+        fun selected(expected: String) { d.ui {
+            val value=e.text.toString(); val start=e.selectionStart; val end=e.selectionEnd
+            assertTrue("INVALID_UTF16_SELECTION",com.fantadrom.copperscroll.session.ui.WordSelection.boundary(value,start) && com.fantadrom.copperscroll.session.ui.WordSelection.boundary(value,end))
+            assertTrue("UNEXPECTED_WORD_SELECTION",start>=0 && end>=start && value.substring(start,end)==expected)
+            assertFalse(e.onTextContextMenuItem(android.R.id.shareText)); assertFalse(e.onTextContextMenuItem(android.R.id.textAssist))
+        } }
+        prepare("original synthetic text with many more words")
+        d.longPress(e,10); selected("synthetic")
+        d.ui { e.bindAccess(d.lease(SettingsData(copyBlocked=false))); e.text.replace(0,e.length(),"short end") }
+        d.longPress(e,1); selected("short")
+        d.ui { e.bindAccess(d.lease(SettingsData(copyBlocked=false))) }
+        d.longPress(e,9); selected("end")
+        prepare("replacement 🔑")
+        d.longPress(e,2); selected("replacement")
+        d.ui { e.bindAccess(d.lease(SettingsData(copyBlocked=false))) }
+        d.longPress(e,Int.MAX_VALUE); selected("🔑")
+        d.ui {
+            assertTrue(e.onTextContextMenuItem(android.R.id.copy))
+            val clip=d.context.getSystemService(ClipboardManager::class.java).primaryClip!!
+            assertTrue(clip.description.extras!!.getBoolean("android.content.extra.IS_SENSITIVE"))
+        }
+        prepare(""); d.longPress(e,0); selected("")
+        prepare("first line\nsecond word\nlast 🔑")
+        d.longPress(e,14); selected("second")
+        d.ui { e.bindAccess(d.lease(SettingsData(copyBlocked=false))) }
+        d.longPress(e,Int.MAX_VALUE); selected("🔑")
+        // Rebinding synchronously during offset calculation retires the captured attempt.
+        prepare("old binding synthetic text")
+        d.ui { e.atOffset={ e.bindAccess(d.lease()); e.setText("new 🔑"); e.setSelection(e.length()) } }
+        d.longPress(e,2)
+        d.ui { assertTrue("BINDING_CHANGED_SELECTION",e.selectionStart==e.length() && e.selectionEnd==e.length()) }
+        // A real selection callback replaces text and recursively re-enters the long-click path.
+        prepare("selection callback synthetic")
+        d.ui { e.atSelection={ e.text.replace(0,e.length(),"x"); e.setSelection(1); e.performLongClick() } }
+        d.longPress(e,2)
+        d.ui { assertEquals(1,e.length()); assertEquals(1,e.selectionStart); assertEquals(1,e.selectionEnd) }
+        prepare("revoked attempt")
+        d.ui { e.atOffset={ d.host().model.revoke() } }
+        d.longPress(e,2)
+        d.ui { assertTrue(e.text.isEmpty()); assertFalse(e.readable()); assertFalse(e.onTextContextMenuItem(android.R.id.copy)); assertNull(d.host().child) }
+        d.login(true)
+        d.ui { e=LongPressEditor(d.host()).apply { showSoftInputOnFocus=false }; d.host().showOwnDialog(e) }
+        prepare("fresh session word"); d.longPress(e,16); selected("word")
+        d.ui { d.host().child!!.dismiss() }
+    }
+    @Test fun harnessInsetsRemainOutsideScrollAcrossOrientations() {
+        fun geometry(outer: View,window: Window) {
+            val decor=window.decorView; val rootAt=IntArray(2); val decorAt=IntArray(2)
+            outer.getLocationOnScreen(rootAt); decor.getLocationOnScreen(decorAt)
+            val safe=checkNotNull(decor.rootWindowInsets).getInsetsIgnoringVisibility(WindowInsets.Type.systemBars() or WindowInsets.Type.displayCutout())
+            val minimum=kotlin.math.ceil(40.0*outer.resources.displayMetrics.density).toInt()
+            assertTrue("TOP_SAFE_VIEWPORT",rootAt[1]-decorAt[1]+outer.paddingTop>=maxOf(minimum,safe.top))
+            assertTrue("BOTTOM_SAFE_VIEWPORT",decorAt[1]+decor.height-rootAt[1]-outer.height+outer.paddingBottom>=maxOf(minimum,safe.bottom))
+            assertTrue("LEFT_SAFE_VIEWPORT",rootAt[0]-decorAt[0]+outer.paddingLeft>=safe.left)
+            assertTrue("RIGHT_SAFE_VIEWPORT",decorAt[0]+decor.width-rootAt[0]-outer.width+outer.paddingRight>=safe.right)
+            assertTrue("VIEWPORT_HAS_NO_SPACE",outer.height>outer.paddingTop+outer.paddingBottom)
+        }
+        val original=d.host().requestedOrientation
+        val originalConfiguration=d.host().resources.configuration.orientation
+        fun orient(orientation: Int) {
+            val previous=d.host(); val previousOrientation=previous.resources.configuration.orientation
+            d.ui { previous.requestedOrientation=orientation }
+            val expected=if(orientation==android.content.pm.ActivityInfo.SCREEN_ORIENTATION_PORTRAIT) android.content.res.Configuration.ORIENTATION_PORTRAIT else android.content.res.Configuration.ORIENTATION_LANDSCAPE
+            d.await("ORIENTATION_FOREGROUND") { (previousOrientation==expected || d.host()!==previous) && d.host().resources.configuration.orientation==expected && d.host().hasWindowFocus() && d.host().model.coordinator.snapshot().foreground.ready && !d.host().root.isLayoutRequested }
+        }
+        var primary: Throwable?=null
+        try {
+            for(orientation in listOf(android.content.pm.ActivityInfo.SCREEN_ORIENTATION_PORTRAIT,android.content.pm.ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE)) {
+                orient(orientation)
+                d.ui {
+                    val a=d.host(); a.addProbeControls(a.privacyPanel); geometry(a.root,a.window)
+                    assertTrue(a.root.getChildAt(0) is android.widget.ScrollView)
+                    a.scroll.fullScroll(View.FOCUS_UP)
+                }
+                d.await("TOP_SCROLL") { d.host().scroll.scrollY==0 && !d.host().root.isLayoutRequested && d.host().privacyPanel.isLaidOut && !d.host().privacyPanel.isLayoutRequested }
+                d.ui { val a=d.host(); val visible=android.graphics.Rect(); assertTrue(a.status.getGlobalVisibleRect(visible)); geometry(a.root,a.window); a.scroll.fullScroll(View.FOCUS_DOWN) }
+                d.await("BOTTOM_SCROLL") { !d.host().root.isLayoutRequested && !d.host().scroll.canScrollVertically(1) }
+                d.ui {
+                    val a=d.host(); val last=a.privacyPanel.getChildAt(a.privacyPanel.childCount-1)
+                    val visible=android.graphics.Rect(); assertTrue("BOTTOM_CONTROL_NOT_REACHABLE",last.getGlobalVisibleRect(visible) && visible.height()==last.height)
+                    geometry(a.root,a.window); a.privacyPanel.let { (it.parent as ViewGroup).removeView(it) }
+                }
+                d.login()
+                d.ui { d.host().scroll.fullScroll(View.FOCUS_UP) }
+                d.await("EDITOR_TOP_LAYOUT") { d.host().scroll.scrollY==0 && !d.host().root.isLayoutRequested && !d.editor().isLayoutRequested }
+                d.ui {
+                    val visible=android.graphics.Rect(); assertTrue("EDITOR_NOT_REACHABLE",d.editor().getGlobalVisibleRect(visible) && visible.height()==d.editor().height)
+                    d.host().showOwnDialog()
+                }
+                d.await("DIALOG_LAYOUT") { d.host().child?.window?.decorView?.let { it.isAttachedToWindow && it.width>0 && it.height>0 && !it.isLayoutRequested }==true }
+                d.ui {
+                    val dialog=d.host().child!!; val outer=(dialog.findViewById<ViewGroup>(android.R.id.content)).getChildAt(0)
+                    geometry(outer,dialog.window!!); assertTrue((outer as ViewGroup).getChildAt(0) is android.widget.ScrollView)
+                    val scroll=outer.getChildAt(0) as android.widget.ScrollView
+                    scroll.fullScroll(View.FOCUS_DOWN)
+                }
+                d.await("DIALOG_BOTTOM_SCROLL") {
+                    val content=d.host().child!!.findViewById<ViewGroup>(android.R.id.content).getChildAt(0) as ViewGroup
+                    (content.getChildAt(0) as android.widget.ScrollView).canScrollVertically(1)==false
+                }
+                d.ui {
+                    val dialog=d.host().child!!
+                    val outer=dialog.findViewById<ViewGroup>(android.R.id.content).getChildAt(0) as ViewGroup
+                    val content=(outer.getChildAt(0) as android.widget.ScrollView).getChildAt(0) as ViewGroup
+                    val close=content.getChildAt(content.childCount-1); val visible=android.graphics.Rect()
+                    assertTrue("DIALOG_CLOSE_NOT_REACHABLE",close.getGlobalVisibleRect(visible) && visible.height()==close.height)
+                    dialog.dismiss(); d.host().model.revoke()
+                }
+                d.await("LOCKED_BEFORE_PICKER") { d.host().hasWindowFocus() && d.host().model.coordinator.snapshot().unlockReady }
+                val monitor=d.instrumentation.addMonitor(com.fantadrom.copperscroll.p6b1harness.P6b1PickerActivity::class.java.name,null,false)
+                try {
+                    d.ui { d.host().launchPicker() }
+                    val picker=checkNotNull(d.instrumentation.waitForMonitorWithTimeout(monitor,40000)) { "PICKER_MISSING" }
+                    d.await("PICKER_LAYOUT") { picker.hasWindowFocus() && picker.window.decorView.width>0 && !picker.window.decorView.isLayoutRequested }
+                    d.ui {
+                        val outer=picker.findViewById<ViewGroup>(android.R.id.content).getChildAt(0)
+                        geometry(outer,picker.window)
+                        val scroll=(outer as ViewGroup).getChildAt(0) as android.widget.ScrollView
+                        val button=scroll.getChildAt(0); val visible=android.graphics.Rect()
+                        assertTrue("PICKER_CANCEL_NOT_REACHABLE",button.getGlobalVisibleRect(visible) && visible.height()==button.height)
+                        assertTrue(button.performClick())
+                    }
+                    d.await("PICKER_RETURN_FOREGROUND") { d.host().hasWindowFocus() && d.host().model.coordinator.snapshot().foreground.ready && !d.host().model.coordinator.snapshot().pendingWork }
+                } finally { d.instrumentation.removeMonitor(monitor) }
+                // No open session is carried through the physical rotation; no change to handoff rules.
+            }
+        } catch(failure: Throwable) { primary=failure; throw failure }
+        finally {
+            try {
+                d.ui { d.host().model.revoke() }
+                orient(if(originalConfiguration==android.content.res.Configuration.ORIENTATION_PORTRAIT) android.content.pm.ActivityInfo.SCREEN_ORIENTATION_PORTRAIT else android.content.pm.ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE)
+                d.ui { d.host().requestedOrientation=original }
+            } catch(cleanup: Throwable) { if(primary!=null) primary.addSuppressed(cleanup) else throw cleanup }
+        }
     }
     @Test fun maintenanceHidesBeforeServiceWork() {
         d.login(); d.ui {

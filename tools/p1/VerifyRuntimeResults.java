@@ -33,7 +33,7 @@ public final class VerifyRuntimeResults {
         require(profile.equals("p2") || profile.equals("p2-benchmark") || profile.equals("p3") || profile.equals("p4") || profile.equals("p5a") || profile.equals("p5b") || profile.equals("p6a") || profile.equals("p6b1") || profile.equals("p6b2"), "Unknown runtime profile");
         if(profile.equals("p6b2")) {
             reportDirectory="p6b2-runtime"; SUITE="com.fantadrom.copperscroll.storage.runtime.P6b2PrivacyRuntimeTest";
-            EXPECTED=Set.of("sessionPoliciesFollowAuthenticatedZones","staleConnectionCannotReadOrMutateNextSession","editorInfoAndCredentialQueryBoundary","blockedCopyCutAndIndependentPaste","sensitiveCopyDoesNotEnableOtherExports","richTextUtf16AndStaleCallbacks","emptyAssistAutofillCaptureStructures","hiddenPasswordAccessibilityAndStaleActions","windowPolicyRejectsStaleAllowCallbacks","savedStateAndCanaryAudit","recreationRetiresNativeConnection","maintenanceHidesBeforeServiceWork"); return;
+            EXPECTED=Set.of("sessionPoliciesFollowAuthenticatedZones","staleConnectionCannotReadOrMutateNextSession","editorInfoAndCredentialQueryBoundary","blockedCopyCutAndIndependentPaste","sensitiveCopyDoesNotEnableOtherExports","richTextUtf16AndStaleCallbacks","emptyAssistAutofillCaptureStructures","hiddenPasswordAccessibilityAndStaleActions","windowPolicyRejectsStaleAllowCallbacks","savedStateAndCanaryAudit","recreationRetiresNativeConnection","maintenanceHidesBeforeServiceWork","longPressAfterReplacementKeepsUtf16AndSessionBoundary","harnessInsetsRemainOutsideScrollAcrossOrientations"); return;
         }
         if(profile.equals("p6b1")) {
             reportDirectory="p6b1-runtime"; SUITE="com.fantadrom.copperscroll.storage.runtime.P6b1SessionRuntimeTest";

@@ -4,7 +4,7 @@ Read [Windows/device instructions](android-runtime-windows.md) and
 [report/matrix](../../docs/architecture/validation/p6b2-report.md).
 
 `p6b2ReleaseRuntimeCheck` delegates to the existing fresh XML+protobuf+runner-exit
-strict gate, with twelve exact methods. Runtime API generation and BOTH mappings
+strict gate, with fourteen exact methods. Runtime API generation and BOTH mappings
 remain bound to actual APK hashes. `testP4SourceIdentity` is mandatory. Host fixtures
 are synthetic evidence of the gate, never Android execution.
 
@@ -42,3 +42,20 @@ python3 tools/p6a/check-isolation.py p6b2
 
 `python3 tools/p6b2/check-privacy-apks.py` additionally rejects an actually exported
 privacy Activity and a wrong ordinary-release mapping marker, using APK copies only.
+
+The 24 October correction adds a real injected touchscreen long-press regression
+(text shortening/replacement, end offsets, empty/multiline/emoji, synchronous
+selection callback mutation/reentry and binding/revoke changes), plus a portrait/
+landscape harness viewport regression. Both are mandatory exact methods; older
+12-method reports cannot satisfy the current gate. Touch points are recomputed
+from the laid-out editor, not screen constants. Ordinary-release taps already use
+current accessibility node bounds.
+
+Shared P6b.1/P6b.2 host, synthetic picker and owned dialog reserve an outer viewport
+before scrolling: effective top/bottom distance is max(40dp, safe system inset),
+left/right reserve system bars/cutout, existing decor consumption is subtracted.
+IME overlap is measured after adjustResize to avoid applying it twice. Geometry
+unit checks cover consumed insets and IME; actual IME, Honor corner/cutout visibility
+and both device orientations still need the guided observations. This does not
+change coordinator rules or qualify storage. The previous Honor handoff failure
+remains OPEN independently of the editor repair.

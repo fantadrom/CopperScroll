@@ -24,12 +24,12 @@ public final class VerifyP6b2RuntimeResultsTest {
             runner(completed+"INSTRUMENTATION_CODE: -1\n",false);
             runner(completed+"INSTRUMENTATION_RESULT: shortMsg=Process crashed.\n",false);
             runner(completed+"INSTRUMENTATION_FAILED\n",false);
-            reset(); write(suite(12,"")); pass();
-            reset(); write("<testsuites tests=\"12\"><testsuite>"+suite(12,"")+"</testsuite></testsuites>"); pass();
+            reset(); write(suite(14,"")); pass();
+            reset(); write("<testsuites tests=\"14\"><testsuite>"+suite(14,"")+"</testsuite></testsuites>"); pass();
             reset(); VerifyRuntimeResults.saveManifest(manifest,Map.of("honor","Honor - 15","emulator","AVD - 17")); provenance();
-            proof(2); write("<testsuites tests=\"24\">"+suite(12,"")+suite(12,"").replace("device=\"honor\"","device=\"emulator\"")+"</testsuites>"); pass();
-            reset(); write(suite(12,"").replace(VerifyRuntimeResults.EXPECTED.iterator().next(),"foreignMethod")); reject();
-            reset(); write(suite(12,"").replace("failures=\"0\"","failures=\"1\"")); reject();
+            proof(2); write("<testsuites tests=\"28\">"+suite(14,"")+suite(14,"").replace("device=\"honor\"","device=\"emulator\"")+"</testsuites>"); pass();
+            reset(); write(suite(14,"").replace(VerifyRuntimeResults.EXPECTED.iterator().next(),"foreignMethod")); reject();
+            reset(); write(suite(14,"").replace("failures=\"0\"","failures=\"1\"")); reject();
             var artifacts=new Properties();
             for(String field:java.util.List.of("artifactBundleId","targetSha256","testSha256","targetMapId","testMapId","targetMappingSha256","testMappingSha256")) artifacts.setProperty(field,"synthetic");
             VerifyRuntimeResults.verifyArtifactFields(artifacts,artifacts); checks++;
@@ -37,37 +37,37 @@ public final class VerifyP6b2RuntimeResultsTest {
                 var changed=new Properties(); changed.putAll(artifacts); changed.setProperty(field,"changed");
                 try { VerifyRuntimeResults.verifyArtifactFields(artifacts,changed); throw new AssertionError("Changed artifact accepted"); } catch(IllegalStateException expected) { checks++; }
             }
-            reset(); write(suite(12,""));
+            reset(); write(suite(14,""));
             String[] methods=VerifyRuntimeResults.EXPECTED.toArray(new String[0]);
-            write(suite(12,"").replace(methods[0],methods[1])); reject();
-            reset(); write(suite(12,"")); Files.write(reports.resolve("test-result.pb"),new byte[]{-1}); reject();
-            reset(); write(suite(12,"")); proof(0); reject();
+            write(suite(14,"").replace(methods[0],methods[1])); reject();
+            reset(); write(suite(14,"")); Files.write(reports.resolve("test-result.pb"),new byte[]{-1}); reject();
+            reset(); write(suite(14,"")); proof(0); reject();
             for(var status:new TestStatus[]{TestStatus.FAILED,TestStatus.SKIPPED}) {
-                reset(); write(suite(12,""));
+                reset(); write(suite(14,""));
                 var pbf=TestSuiteResult.newBuilder().setTestStatus(status);
                 for(String method:VerifyRuntimeResults.EXPECTED) pbf.addTestResult(TestResult.newBuilder().setTestStatus(status)
                     .setTestCase(TestCase.newBuilder().setTestPackage("com.fantadrom.copperscroll.storage.runtime").setTestClass("P6b2PrivacyRuntimeTest").setTestMethod(method)));
                 Files.write(reports.resolve("test-result.pb"),pbf.build().toByteArray()); reject();
             }
             for(String field:java.util.List.of("device.0.api","device.0.build")) {
-                reset(); write(suite(12,"")); Properties missing=new Properties(); try(var in=Files.newInputStream(manifest)) { missing.load(in); }
+                reset(); write(suite(14,"")); Properties missing=new Properties(); try(var in=Files.newInputStream(manifest)) { missing.load(in); }
                 missing.remove(field); try(var out=Files.newOutputStream(manifest)) { missing.store(out,"Missing device metadata fixture"); } reject();
             }
             checkProbeFixtures();
             reset(); write(suite(0,"")); reject();
-            reset(); write(suite(11,"")); reject();
-            for(String marker:new String[]{"<failure/>","<error/>","<skipped/>"}) { reset(); write(suite(12,marker)); reject(); }
+            reset(); write(suite(13,"")); reject();
+            for(String marker:new String[]{"<failure/>","<error/>","<skipped/>"}) { reset(); write(suite(14,marker)); reject(); }
             reset(); reject();
-            reset(); write(suite(12,"")); Files.delete(reports.resolve("test-result.pb")); reject();
-            reset(); write(suite(12,"")); Files.writeString(reports.resolve("test-result-exit-code.txt"),"1"); reject();
-            reset(); write(suite(12,"")); Files.setLastModifiedTime(reports.resolve("TEST-p6b2.xml"),java.nio.file.attribute.FileTime.fromMillis(1)); reject();
-            reset(); write(suite(12,"")); Files.setLastModifiedTime(reports.resolve("test-result.pb"),java.nio.file.attribute.FileTime.fromMillis(1)); reject();
-            reset(); write(suite(12,"").replace(VerifyRuntimeResults.SUITE,"com.fantadrom.copperscroll.storage.runtime.P3TransactionRuntimeTest")); reject();
-            reset(); write(suite(12,"").replace("honor","unknown-device")); reject();
-            reset(); write(suite(12,"")+suite(12,"")); reject();
-            reset(); write(suite(12,"")); Properties p=new Properties(); try(var in=Files.newInputStream(manifest)) { p.load(in); }
+            reset(); write(suite(14,"")); Files.delete(reports.resolve("test-result.pb")); reject();
+            reset(); write(suite(14,"")); Files.writeString(reports.resolve("test-result-exit-code.txt"),"1"); reject();
+            reset(); write(suite(14,"")); Files.setLastModifiedTime(reports.resolve("TEST-p6b2.xml"),java.nio.file.attribute.FileTime.fromMillis(1)); reject();
+            reset(); write(suite(14,"")); Files.setLastModifiedTime(reports.resolve("test-result.pb"),java.nio.file.attribute.FileTime.fromMillis(1)); reject();
+            reset(); write(suite(14,"").replace(VerifyRuntimeResults.SUITE,"com.fantadrom.copperscroll.storage.runtime.P3TransactionRuntimeTest")); reject();
+            reset(); write(suite(14,"").replace("honor","unknown-device")); reject();
+            reset(); write(suite(14,"")+suite(14,"")); reject();
+            reset(); write(suite(14,"")); Properties p=new Properties(); try(var in=Files.newInputStream(manifest)) { p.load(in); }
             p.remove("gradleVersion"); try(var out=Files.newOutputStream(manifest)) { p.store(out,"Missing provenance fixture"); } reject();
-            reset(); write(suite(12,"")); p=new Properties(); try(var in=Files.newInputStream(manifest)) { p.load(in); }
+            reset(); write(suite(14,"")); p=new Properties(); try(var in=Files.newInputStream(manifest)) { p.load(in); }
             p.remove("sourceIdentitySha256"); try(var out=Files.newOutputStream(manifest)) { p.store(out,"Missing provenance hash fixture"); } reject();
         } catch(Exception|Error failure) { primary=failure; throw failure; }
         finally {

@@ -24,7 +24,7 @@ production backend только в target. R8 включён с прежним s
 storage/ICU/crypto и application UI вне optimization. Отличия от ordinary release:
 suffix/подпись/opt-in harness/инструментационный ABI. Startup/lifecycle сохранены.
 
-Ожидается **ровно12 completed PASS на каждом устройстве**, failures/errors/skipped=0,
+Ожидается **ровно14 completed PASS на каждом устройстве**, failures/errors/skipped=0,
 `P6b2PrivacyRuntimeTest`, exact methods:
 
 1. `sessionPoliciesFollowAuthenticatedZones`
@@ -39,6 +39,8 @@ suffix/подпись/opt-in harness/инструментационный ABI. S
 10. `savedStateAndCanaryAudit`
 11. `recreationRetiresNativeConnection`
 12. `maintenanceHidesBeforeServiceWork`
+13. `longPressAfterReplacementKeepsUtf16AndSessionBoundary`
+14. `harnessInsetsRemainOutsideScrollAcrossOrientations`
 
 `BUILD SUCCESSFUL` без exact suite receipt недостаточно. Gate отвергает zero,
 partial/duplicates/skipped/crash/stale/foreign/XML–protobuf discrepancy/runner exit
@@ -61,8 +63,21 @@ Build failure до runtime: последний UUID в `app/build/reports/p6b2-b
 **NOT_CONFIRMED**, затем **Finish privacy observations**. Не подтверждать непроверенное.
 Отсутствующее действие записывается NOT_RUN, любой FAIL сохраняется и валит gate.
 
-- `active_ime`: коснуться editor, ввести synthetic текст, проверить нормальный ввод,
-  composing/selection; Home и возврат требуют нового явного входа. Обычная IME
+- `active_ime`: на **каждом устройстве в портретной и горизонтальной ориентации**
+  коснуться editor, ввести длинный synthetic текст, затем сократить/заменить его.
+  Сделать настоящее долгое нажатие в начале, середине и конце, включая emoji `🔑`,
+  пустое поле и несколько строк. Проверить выделение слова без падения, ввод и
+  composing; после revoke и явного нового входа прежние действия не работают.
+  Убедиться, что верхний status, editor и нижние кнопки полностью видны: с закрытой
+  и открытой IME прокрутить к обоим краям. Проверить **Own dialog** и его кнопку
+  **Close synthetic dialog**, а также synthetic picker из P6b.1 automatic suite.
+  Отступы находятся вне прокрутки: сверху/снизу эффективный минимум40dp или больший
+  безопасный inset, по бокам учитываются вырез/панели; уже потреблённые decor insets
+  не складываются повторно. Изменение ориентации не разрешает автоматический вход.
+  Если любая кнопка/строка перекрыта или не достигается прокруткой — FAIL.
+  В сообщении с результатами отдельно указать обе ориентации/IME/dialog для Honor
+  и AVD; существующие пять observation groups сохраняются.
+  Home и возврат требуют нового явного входа. Обычная IME
   получает открытый ввод; no-learning не доказывает удаления истории. Не исследовать
   чужие IME buffers. При недоступном IME/режиме — NOT_RUN.
 - `clipboard_preview`: blocked copy/cut должны отказать без удаления текста; paste
@@ -122,6 +137,10 @@ KEYCODE_SLEEP, ждёт реального системного observation, в�
 самостоятельно посреди этого controller. Поля home/screenoff требуют
 OBSERVED_ACTUAL_EVENT_AND_RECREATION_LOCKED; любой неизвестный исход — FAIL с evidence.
 
+**Предыдущий пользовательский отказ handoff на Honor остаётся OPEN.** Исправление
+long-press и safe insets его не закрывает; для закрытия нужен отдельный успешный
+handoff receipt с диагностикой. Новый privacy PASS также не закрывает эту проблему.
+
 Граница намеренно узкая: между beginHandoff и вызовом recreate, а не доказанный
 момент физического rotation/resize внутри OEM relaunch. Та последняя ветвь остаётся
 NOT_CONFIRMED. Receipt/checkpoints/ZIP: `app/build/reports/p6b2-handoff/<runId>/`.
@@ -153,7 +172,7 @@ release-подписи; code/resources — обычный release, не p1Releas
 
 Внешний observer выполняет ровно один метод
 `P6b2OrdinaryReleaseProbe.publicLauncherEditorAndHomeReturn`; это отдельное evidence,
-не дополнительный метод automatic suite12.
+не дополнительный метод automatic suite14.
 
 Итог OBSERVED_ORDINARY_RELEASE_LAUNCH_SECURE_WINDOWS_HOME_RETURN и независимый
 nativeEditor статус. Screenshot/recents изображения требуют guided observation;
@@ -214,7 +233,7 @@ foreach ($check in $checks) {
 
 Сохранить runtime-result.txt/diagnostic ZIP каждого профиля перед следующим обновлением
 кода. KDF benchmark и P6a.2 reboot автоматически не нужны. При доступном отдельном
-API31 AVD запустить ту же exact12 automatic команду с ним как единственным online
+API31 AVD запустить ту же exact14 automatic команду с ним как единственным online
 устройством; отсутствие API31 runner записать NOT_RUN (minSdk compile не runtime).
 
 При ошибке прислать compact receipt, diagnostics.zip/p1-diagnostics.zip либо последний
